@@ -1,12 +1,14 @@
 # FileBuddy
 
+![FileBuddy Icon](Images/Icon_Scaled.png)
+
 FileBuddy is a utility Python script, intended to make quickly modifying, searching, and working with files easy.
 
 ## Usage
 
 1. Make sure you have Python 3 installed.
 2. Download the repository.
-3. Add the directory with the repository to your environment variables.
+3. Add the Source directory within the repository to your system environment variables.
 4. Open a terminal and run FileBuddy.
 
 General form of command:
