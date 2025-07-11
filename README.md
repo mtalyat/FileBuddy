@@ -39,6 +39,8 @@ Only search, rename, copy and move use `<options>`.
 
 For rename, copy, move, can use `$(N)` arguments in their destination names to references the groups from the `-p` regex pattern. For example, `$(0)` will be replaced with the whole pattern match, and `$(1)` will be replaced with the first capturing group, etc.
 
+For rename, copy, move, and delete, you must can use the `-y` argument to skip the confirmation.
+
 It is recommended to use `-a` with `size` to ensure you get the proper sizes of directires. Otherwise, hidden sub-directories and files are ignored, which may yield invalid results. 
 
 ## Flags
@@ -52,3 +54,4 @@ It is recommended to use `-a` with `size` to ensure you get the proper sizes of 
 | `-o`, `--output` | `-o "log.txt"` | If given, all output will be redirected to a file. If not given, the output is printed in the terminal. |
 | `-a`, `--all` | `-a` | Includes hidden directories and files in the search. |
 | `-v`, `--verbose` | `-v` | Outputs additional information for some commands. |
+| `-y`, `--yes` | `-y` | Automatically confirms all confirmation prompts. |
