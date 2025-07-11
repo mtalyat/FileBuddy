@@ -22,6 +22,64 @@ SUCCESS_COLOR = '\033[32m' # Green
 INFO_COLOR = '\033[90m' # Gray
 RESET_COLOR = '\033[0m' # Reset
 
+class Stopwatch:
+    start_time: float
+    elapsed_time: float
+    running: bool
+
+    def __init__(self):
+        self.start_time = 0
+        self.elapsed_time = 0
+        self.running = False
+
+    def start(self):
+        if not self.running:
+            self.start_time = time.time()
+            self.running = True
+
+    def stop(self):
+        if self.running:
+            self.elapsed_time += time.time() - self.start_time
+            self.running = False
+
+    def reset(self):
+        self.start_time = 0
+        self.elapsed_time = 0
+        self.running = False
+
+    def elapsed(self) -> float:
+        if self.running:
+            return time.time() - self.start_time + self.elapsed_time
+        return self.elapsed_time
+
+class Action:
+    name: str
+    format: str
+    func: callable
+    common: list[any]
+    specific: list[list[any]]
+
+    def __init__(self, name: str, format: str, func: callable, common: list, specific: list):
+        self.name = name
+        self.func = func
+        self.format = format
+        self.common = common
+        self.specific = specific
+
+    def print_actions(self):
+        print('\n'.join([f"{self.format.format(*args)}" for args in self.specific]))
+
+    def print(self):
+        print(f'{self.name}:')
+        self.print_actions()
+
+    def invoke(self) -> int:
+        count = 0
+        for set in self.specific:
+            if self.func(*self.common, *set):
+                count += 1
+        return count
+
 class Spinner:
     def __init__(self, message='', chars="|/-\\"):
         self.message = message
@@ -53,7 +111,8 @@ class Spinner:
 
 def fix_path(path: str) -> str:
     """Fixes the path to be uniform across different operating systems."""
-    return path.replace('\\', '/').replace('//', '/')
+    path = path.replace('\\', '/').replace('//', '/')
+    return path
 
 def split_match(match) -> tuple[str, str, str]:
     """Splits a match object into before, match, and after parts."""
@@ -72,6 +131,16 @@ def regex_sub(match_obj, text: str) -> str:
         except IndexError:
             return ''
     return re.sub(r'\$\((\d+)\)', group_replacer, text)
+
+def get_confirmation(prompt: str) -> bool:
+    """Prompts the user for confirmation and returns True if confirmed, False otherwise."""
+    while True:
+        response = input(f"{prompt} (y/n): ").strip().lower()
+        if response in ['y', 'yes']:
+            return True
+        elif response in ['n', 'no']:
+            return False
+        print("Invalid input. Please enter 'y' or 'n'.")
 
 def get_terminal_width() -> int:
     """Returns the width of the terminal."""
@@ -155,7 +224,7 @@ def print_summary(title: str, results: dict):
     print("+" + "-" * content_width + "+")
 
 def main():
-    parser = argparse.ArgumentParser('FileBuddy', f'fb [{"|".join(COMMANDS)}] [options] [-p pattern] [-d directory] [-r recursive] [-o output] [-a hidden] [-v verbose] [-h help]')
+    parser = argparse.ArgumentParser('FileBuddy', f'fb [{"|".join(COMMANDS)}] [options] [-p pattern] [-d directory] [-r recursive] [-o output] [-a all] [-v verbose] [-y --yes] [-h help]')
     parser.add_argument('command', choices=COMMANDS, help='Command to execute')
     parser.add_argument('options', nargs='*', help='Options for the command')
     parser.add_argument('-p', '--pattern', type=str, help='File pattern to search for')
@@ -163,6 +232,7 @@ def main():
     parser.add_argument('-r', '--recursive', action='store_true', help='Search recursively in subdirectories')
     parser.add_argument('-o', '--output', type=str, help='Output file to write results to')
     parser.add_argument('-a', '--all', action='store_true', help='Include hidden files in the search')
+    parser.add_argument('-y', '--yes', action='store_true', help='Automatically confirm prompts (e.g., for deletion)')
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
 
     if(len(sys.argv) <= 1):
@@ -206,6 +276,7 @@ def main():
     recursive = getattr(args, 'recursive', False)
     hidden = getattr(args, 'all', False)
     verbose = getattr(args, 'verbose', False)
+    autoConfirm = getattr(args, 'yes', False)
 
     # get output file, if any
     output_file = getattr(args, 'output', None)
@@ -294,6 +365,47 @@ def main():
         else:
             # format the message with color
             print_safe(f'{INFO_COLOR}{message}{RESET_COLOR}')
+
+    def cancel():
+        """Cancels the current operation."""
+        spinner.stop()
+        print_output('Operation cancelled.')
+        sys.exit(0)
+
+    def run_actions(autoConfirm: bool, actions: list[Action], continuous: bool = True) -> list[int]:
+        # if no specific actions, return empty none
+        if not actions:
+            cancel()
+        count = 0
+        for action in actions:
+            count += len(action.specific)
+        if count == 0:
+            print_output('No actions to perform.')
+            cancel()
+        
+        confirmed = autoConfirm
+
+        # if not confirmed, print all actions and ask for confirmation
+        if not confirmed:
+            spinner.stop()
+            actions[0].print()
+            if continuous:
+                for action in actions[1:]:
+                    action.print_actions()
+            else:
+                for action in actions[1:]:
+                    action.print()
+            if not get_confirmation("Are you sure you want to execute these actions?"):
+                cancel()
+        
+        # confirmed, run all actions
+        results = []
+        spinner.start()
+        for action in actions:
+            count = action.invoke()
+            results.append(count)
+        spinner.stop()
+        return results
 
     # run different commands
     if command == CMD_SEARCH:
@@ -564,46 +676,58 @@ def main():
             print(f'No pattern specified. Expecting a pattern to rename files.')
             sys.exit(1)
 
+        def rename(old_path: str, new_path: str) -> bool:
+            try:
+                print_info(f'Renaming: {old_path} => {new_path}')
+                os.rename(old_path, new_path)
+                print_output(f'{old_path} => {new_path}')
+                return True
+            except Exception as e:
+                print_error(f'Could not rename directory {old_path}: {e}')
+                return False
+            
+        renameDirsAction = Action('Rename', '{} => {}', rename, [], [])
+        renameFilesAction = Action('Rename', '{} => {}', rename, [], [])
+
         # search all files and directories by walking through them
-        results_directories = 0
-        results_files = 0
         for root, dirs, files in os.walk(directory):
             root = fix_path(root)
             # ignore hidden files and directories if hidden flag is not set
             if not hidden and '/.' in root:
                 continue
 
-            def rename(old_name: str, new_name: str) -> bool:
+            def _rename(name: str, new_name: str, action: Action) -> bool:
                 # ignore hidden directories if hidden flag is not set
-                if not hidden and old_name.startswith('.'):
+                if not hidden and name.startswith('.'):
                     return False
 
                 # if name pattern, and directory does not match, skip it
-                match_obj = re.search(pattern, old_name)
+                match_obj = re.search(pattern, name)
                 if not match_obj:
                     return False
 
-                old_path = f'{root}/{old_name}'
+                old_path = f'{root}/{name}'
                 new_path = f'{root}/{regex_sub(match_obj, new_name)}'
 
-                try:
-                    os.rename(old_path, new_path)
-                    print_output(f'{old_path} => {new_path}')
-                    return True
-                except Exception as e:
-                    print_error(f'Could not rename directory {old_path}: {e}')
-                    return False
+                action.specific.append([old_path, new_path])
                 
             for dir in dirs:
-                if rename(dir, new_name):
-                    results_directories += 1
+                _rename(dir, new_name, renameDirsAction)
             for file in files:
-                if rename(file, new_name):
-                    results_files += 1
+                _rename(file, new_name, renameFilesAction)
 
             if not recursive:
                 break
-        tables.append(('Summary', {"Directories renamed: ": results_directories, "Files renamed: ": results_files}))
+        
+        # run the actions
+        actions = [renameDirsAction, renameFilesAction]
+        results = run_actions(autoConfirm, actions)
+
+        if results is None:
+            print_output('Operation cancelled.')
+            sys.exit(0)
+
+        tables.append(('Summary', {"Directories renamed: ": results[0], "Files renamed: ": results[1]}))
     elif command == CMD_DELETE:
         # check options
         if optionsCount > 0:
@@ -614,16 +738,66 @@ def main():
             print(f'No pattern specified. Expecting a pattern to delete files.')
             sys.exit(1)
 
+        def delete_file(path: str) -> bool:
+            try:
+                print_info(f'Deleting file: {path}')
+                os.remove(path)
+                print_output(path)
+                return True
+            except Exception as e:
+                print_error(f'Could not delete file {path}: {e}')
+                return False
+        
+        def delete_directory(path: str) -> bool:
+            try:
+                print_info(f'Deleting directory contents: {path}/')
+                # remove sub directories and sub files first
+                for sub_root, sub_dirs, sub_files in os.walk(path, topdown=False):
+                    for sub_file in sub_files:
+                        sub_path = fix_path(f'{sub_root}/{sub_file}')
+                        print_info(f'Deleting sub-file: {sub_path}')
+                        try:
+                            os.remove(sub_path)
+                        except Exception as e:
+                            print_error(f'Could not delete file {sub_path}: {e}')
+                    for sub_dir in sub_dirs:
+                        print_info(f'Deleting sub-directory: {sub_dir}')
+                        sub_path = f'{sub_root}/{sub_dir}'
+                        try:
+                            os.rmdir(sub_path)
+                        except Exception as e:
+                            print_error(f'Could not delete directory {sub_path}: {e}')
+                print_info(f'Deleting directory: {path}/')
+                try:
+                    os.rmdir(path)
+                    print_output(f'{path}/')
+                except Exception as e:
+                    print_error(f'Could not delete directory {path}: {e}')
+                    return False
+                return True
+            except Exception as e:
+                print_error(f'Could not delete directory {path}: {e}')
+                return False
+
+        directoriesAction = Action('Delete', '{}/', delete_directory, [], [])
+        filesAction = Action('Delete', '{}', delete_file, [], [])
+        directoriesToDelete = list()
+
         # search all files and directories by walking through them
-        results_directories = 0
-        results_files = 0
         for root, dirs, files in os.walk(directory):
             root = fix_path(root)
             # ignore hidden files and directories if hidden flag is not set
             if not hidden and '/.' in root:
                 continue
 
-            def delete(name: str, directory: bool) -> bool:
+            print_info(f'Searching "{root}" for files and directories to delete')
+
+            # skip directories that are already marked for deletion
+            for dir in directoriesToDelete:
+                if root.startswith(dir):
+                    continue
+
+            def _delete(name: str, directory: bool) -> bool:
                 # ignore hidden directories if hidden flag is not set
                 if not hidden and name.startswith('.'):
                     return False
@@ -635,39 +809,28 @@ def main():
                 
                 full_path = f'{root}/{name}'
 
-                try:
-                    if directory:
-                        # remove sub directories
-                        for sub_root, sub_dirs, sub_files in os.walk(full_path, topdown=False):
-                            for sub_file in sub_files:
-                                sub_path = os.path.join(sub_root, sub_file)
-                                os.remove(sub_path)
-                                print_info(f'Deleted file: {sub_path}')
-                            for sub_dir in sub_dirs:
-                                sub_path = os.path.join(sub_root, sub_dir)
-                                os.rmdir(sub_path)
-                                print_info(f'Deleted directory: {sub_path}')
-                        # remove the directory itself
-                        os.rmdir(full_path)
-                    else:
-                        # remove the file
-                        os.remove(full_path)
-                    print_output(f'{full_path}')
-                    return True
-                except Exception as e:
-                    print_error(f'Could not rename directory {name}: {e}')
-                    return False
+                if directory:
+                    # remove the directory
+                    directoriesAction.specific.append([full_path])
+                    directoriesToDelete.append(full_path)
+                else:
+                    # remove the file
+                    filesAction.specific.append([full_path])
+                return True
                 
             for dir in dirs:
-                if delete(dir, True):
-                    results_directories += 1
+                _delete(dir, True)
             for file in files:
-                if delete(file, False):
-                    results_files += 1
+                _delete(file, False)
 
             if not recursive:
                 break
-        tables.append(('Summary', {"Directories deleted: ": results_directories, "Files deleted: ": results_files}))
+        
+        # run the actions
+        actions = [directoriesAction, filesAction]
+        results = run_actions(autoConfirm, actions)
+
+        tables.append(('Summary', {"Directories deleted: ": results[0], "Files deleted: ": results[1]}))
     elif command == CMD_COPY:
         # check options
         if optionsCount < 1:
@@ -683,15 +846,50 @@ def main():
             print(f'No pattern specified. Expecting a pattern to copy files.')
             sys.exit(1)
 
-        results_directories = 0
-        results_files = 0
+        def move_file(from_path: str, to_path: str) -> bool:
+            try:
+                print_info(f'Copying file: {from_path} => {to_path}')
+                shutil.copy2(from_path, to_path)
+                print_output(f'{from_path} => {to_path}')
+                return True
+            except Exception as e:
+                print_error(f'Could not copy file {from_path}: {e}')
+                return False
+
+        def move_directory(from_path: str, to_path: str) -> bool:
+            try:
+                print_info(f'Copying directory: {from_path}/ => {to_path}/')
+                os.makedirs(to_path, exist_ok=True)
+                for root, dirs, files in os.walk(from_path):
+                    rel_root = fix_path(os.path.relpath(root, from_path))
+                    if rel_root == '.':
+                        target_root = to_path
+                    else:
+                        target_root = f'{to_path}/{rel_root}'
+                        print_info(f'Creating target directory: {target_root}')
+                        os.makedirs(target_root, exist_ok=True)
+                    for file in files:
+                        src_file = f'{root}/{file}'
+                        dst_file = f'{target_root}/{file}'
+                        print_info(f'Copying sub-file: {src_file} => {dst_file}')
+                        shutil.copy2(src_file, dst_file)
+                print_output(f'{from_path}/ => {to_path}/')
+                return True
+            except Exception as e:
+                print_error(f'Could not copy directory {from_path}: {e}')
+                return False
+
+        moveDirsAction = Action('Copy', '{} => {}', move_directory, [], [])
+        moveFilesAction = Action('Copy', '{} => {}', move_file, [], [])
+
+        # search all files and directories by walking through them
         for root, dirs, files in os.walk(directory):
             root = fix_path(root)
             # ignore hidden files and directories if hidden flag is not set
             if not hidden and '/.' in root:
                 continue
 
-            def move_item(name: str, destination: str, is_dir: bool) -> bool:
+            def _move(name: str, is_dir: bool, action: Action) -> bool:
                 # ignore hidden directories if hidden flag is not set
                 if not hidden and name.startswith('.'):
                     return False
@@ -702,6 +900,7 @@ def main():
                     return False
 
                 from_path = f'{root}/{name}'
+                destination = output_path
                 if not is_dir and destination.endswith('/'):
                     destination += name
                 elif is_dir and os.path.isdir(destination):
@@ -711,32 +910,26 @@ def main():
                         destination += f'/{name}'
                 to_path = f'{regex_sub(match_obj, destination)}'
 
-                # copy the contents
-                if is_dir:
-                    try:
-                        shutil.copytree(from_path, to_path, dirs_exist_ok=True)
-                    except shutil.Error as e:
-                        print_error(f'Could not copy directory {from_path} to {to_path}: {e}')
-                        return False
-                else:
-                    try:
-                        shutil.copy2(from_path, to_path)
-                    except shutil.Error as e:
-                        print_error(f'Could not copy file {from_path} to {to_path}: {e}')
-                        return False
-                print_output(f'{from_path} => {to_path}')
+                action.specific.append([from_path, to_path])
                 return True
 
             for dir in dirs:
-                if move_item(dir, output_path, True):
-                    results_directories += 1
+                _move(dir, True, moveDirsAction)
             for file in files:
-                if move_item(file, output_path, False):
-                    results_files += 1
+                _move(file, False, moveFilesAction)
 
             if not recursive:
                 break
-        tables.append(('Summary', {"Directories copied: ": results_directories, "Files copied: ": results_files}))
+        
+        # run the actions
+        actions = [moveDirsAction, moveFilesAction]
+        results = run_actions(autoConfirm, actions)
+
+        if results is None:
+            print_output('Operation cancelled.')
+            sys.exit(0)
+
+        tables.append(('Summary', {"Directories copied: ": results[0], "Files copied: ": results[1]}))
     elif command == CMD_MOVE:
         # check options
         if optionsCount < 1:
@@ -749,18 +942,55 @@ def main():
         output_path = options[0]
 
         if not pattern:
-            print(f'No pattern specified. Expecting a pattern to move files.')
+            print(f'No pattern specified. Expecting a pattern to copy files.')
             sys.exit(1)
 
-        results_directories = 0
-        results_files = 0
+        def move_file(from_path: str, to_path: str) -> bool:
+            try:
+                print_info(f'Moving file: {from_path} => {to_path}')
+                shutil.move(from_path, to_path)
+                print_output(f'{from_path} => {to_path}')
+                return True
+            except Exception as e:
+                print_error(f'Could not move file {from_path}: {e}')
+                return False
+
+        def move_directory(from_path: str, to_path: str) -> bool:
+            try:
+                print_info(f'Moving directory: {from_path}/ => {to_path}/')
+                os.makedirs(to_path, exist_ok=True)
+                for root, dirs, files in os.walk(from_path):
+                    rel_root = fix_path(os.path.relpath(root, from_path))
+                    if rel_root == '.':
+                        target_root = to_path
+                    else:
+                        target_root = f'{to_path}/{rel_root}'
+                        print_info(f'Creating target directory: {target_root}')
+                        os.makedirs(target_root, exist_ok=True)
+                    for file in files:
+                        src_file = f'{root}/{file}'
+                        dst_file = f'{target_root}/{file}'
+                        print_info(f'Moving sub-file: {src_file} => {dst_file}')
+                        shutil.move(src_file, dst_file)
+                # remove the original directory
+                shutil.rmtree(from_path)
+                print_output(f'{from_path}/ => {to_path}/')
+                return True
+            except Exception as e:
+                print_error(f'Could not move directory {from_path}: {e}')
+                return False
+
+        moveDirsAction = Action('Move', '{} => {}', move_directory, [], [])
+        moveFilesAction = Action('Move', '{} => {}', move_file, [], [])
+
+        # search all files and directories by walking through them
         for root, dirs, files in os.walk(directory):
             root = fix_path(root)
             # ignore hidden files and directories if hidden flag is not set
             if not hidden and '/.' in root:
                 continue
 
-            def move_item(name: str, destination: str, is_dir: bool) -> bool:
+            def _move(name: str, is_dir: bool, action: Action) -> bool:
                 # ignore hidden directories if hidden flag is not set
                 if not hidden and name.startswith('.'):
                     return False
@@ -771,6 +1001,7 @@ def main():
                     return False
 
                 from_path = f'{root}/{name}'
+                destination = output_path
                 if not is_dir and destination.endswith('/'):
                     destination += name
                 elif is_dir and os.path.isdir(destination):
@@ -780,25 +1011,26 @@ def main():
                         destination += f'/{name}'
                 to_path = f'{regex_sub(match_obj, destination)}'
 
-                # copy the contents
-                try:
-                    shutil.move(from_path, to_path)
-                except shutil.Error as e:
-                    print_error(f'Could not move directory {from_path} to {to_path}: {e}')
-                    return False
-                print_output(f'{from_path} => {to_path}')
+                action.specific.append([from_path, to_path])
                 return True
 
             for dir in dirs:
-                if move_item(dir, output_path, True):
-                    results_directories += 1
+                _move(dir, True, moveDirsAction)
             for file in files:
-                if move_item(file, output_path, False):
-                    results_files += 1
+                _move(file, False, moveFilesAction)
 
             if not recursive:
                 break
-        tables.append(('Summary', {"Directories moved: ": results_directories, "Files moved: ": results_files}))
+        
+        # run the actions
+        actions = [moveDirsAction, moveFilesAction]
+        results = run_actions(autoConfirm, actions)
+
+        if results is None:
+            print_output('Operation cancelled.')
+            sys.exit(0)
+
+        tables.append(('Summary', {"Directories moved: ": results[0], "Files moved: ": results[1]}))
 
     spinner.stop()
 
