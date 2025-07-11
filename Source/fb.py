@@ -32,6 +32,12 @@ class Stopwatch:
         self.elapsed_time = 0
         self.running = False
 
+    def __str__(self):
+        hours, rem = divmod(int(self.elapsed_time), 3600)
+        minutes, seconds = divmod(rem, 60)
+        milliseconds = int((self.elapsed_time - int(self.elapsed_time)) * 10000)
+        return f"{hours:02}:{minutes:02}:{seconds:02}.{milliseconds:04}"
+
     def start(self):
         if not self.running:
             self.start_time = time.time()
@@ -148,12 +154,6 @@ def get_terminal_width() -> int:
         return os.get_terminal_size().columns
     except OSError:
         return 80  # Fallback width if terminal size cannot be determined
-    
-def get_time_string(elapsed_time: float) -> str:
-    hours, rem = divmod(int(elapsed_time), 3600)
-    minutes, seconds = divmod(rem, 60)
-    milliseconds = int((elapsed_time - int(elapsed_time)) * 10000)
-    return f"{hours:02}:{minutes:02}:{seconds:02}.{milliseconds:04}"
 
 def get_byte_string(num_bytes: int) -> str:
     """Converts a number of bytes to a human-readable string with 2 decimal places."""
@@ -309,10 +309,11 @@ def main():
     elif command == CMD_MOVE:
         spinnerMessage = 'Moving...'
 
-    start_time = time.time()
-
     spinner = Spinner(spinnerMessage)
     spinner.start()
+
+    watch = Stopwatch()
+    watch.start()
 
     def print_safe(message: str):
         spinner.clear()
@@ -389,6 +390,7 @@ def main():
         # if not confirmed, print all actions and ask for confirmation
         if not confirmed:
             spinner.stop()
+            watch.stop()
             actions[0].print()
             if continuous:
                 for action in actions[1:]:
@@ -401,6 +403,7 @@ def main():
         
         # confirmed, run all actions
         results = []
+        watch.start()
         spinner.start()
         for action in actions:
             count = action.invoke()
@@ -1018,14 +1021,10 @@ def main():
         tables.append(('Summary', {"Directories moved: ": results[0], "Files moved: ": results[1]}))
 
     spinner.stop()
-
-    # stop timer
-    end_time = time.time()
+    watch.stop()
 
     # add elapsed time to first table (presumable the summary)
-    elapsed_time = end_time - start_time
-    elapsed_str = get_time_string(elapsed_time)
-    tables[0][1]['Elapsed Time'] = elapsed_str
+    tables[0][1]['Elapsed Time'] = str(watch)
 
     # print all tables
     for title, results in tables:
