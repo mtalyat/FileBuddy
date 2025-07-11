@@ -255,13 +255,14 @@ def main():
     
     # get pattern, if none, default to all files
     pattern = getattr(args, 'pattern', None)
-    if pattern is not None:
-        # if pattern is a regex, compile it
-        try:
-            re.compile(pattern)
-        except re.error as e:
-            print(f"Invalid regex pattern '{pattern}': {e}")
-            sys.exit(1)
+    if pattern is None:
+        pattern = '.*'
+    # if pattern is a regex, compile it
+    try:
+        re.compile(pattern)
+    except re.error as e:
+        print(f"Invalid regex pattern '{pattern}': {e}")
+        sys.exit(1)
     
     # get directory and set it to current directory if not specified
     directory = getattr(args, 'directory', None)
@@ -672,10 +673,6 @@ def main():
 
         new_name = options[0]
 
-        if not pattern:
-            print(f'No pattern specified. Expecting a pattern to rename files.')
-            sys.exit(1)
-
         def rename(old_path: str, new_path: str) -> bool:
             try:
                 print_info(f'Renaming: {old_path} => {new_path}')
@@ -732,10 +729,6 @@ def main():
         # check options
         if optionsCount > 0:
             print(f'Too many options given. Expecting no options.')
-            sys.exit(1)
-
-        if not pattern:
-            print(f'No pattern specified. Expecting a pattern to delete files.')
             sys.exit(1)
 
         def delete_file(path: str) -> bool:
@@ -842,10 +835,6 @@ def main():
 
         output_path = options[0]
 
-        if not pattern:
-            print(f'No pattern specified. Expecting a pattern to copy files.')
-            sys.exit(1)
-
         def move_file(from_path: str, to_path: str) -> bool:
             try:
                 print_info(f'Copying file: {from_path} => {to_path}')
@@ -940,10 +929,6 @@ def main():
             sys.exit(1)
 
         output_path = options[0]
-
-        if not pattern:
-            print(f'No pattern specified. Expecting a pattern to copy files.')
-            sys.exit(1)
 
         def move_file(from_path: str, to_path: str) -> bool:
             try:
