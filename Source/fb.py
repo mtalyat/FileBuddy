@@ -129,14 +129,14 @@ def split_match(match) -> tuple[str, str, str]:
     return before, match_text, after
 
 def regex_sub(match_obj, text: str) -> str:
-    """Replaces '$(0)' with the entire match, '$(1)' with group 1, etc."""
+    """Replaces '$0' with the entire match, '$1' with group 1, etc."""
     def group_replacer(match):
         idx = int(match.group(1))
         try:
             return match_obj.group(idx)
         except IndexError:
             return ''
-    return re.sub(r'\$\((\d+)\)', group_replacer, text)
+    return re.sub(r'\$(\d+)', group_replacer, text)
 
 def get_confirmation(prompt: str) -> bool:
     """Prompts the user for confirmation and returns True if confirmed, False otherwise."""
