@@ -5,6 +5,12 @@ import re
 import time
 import threading
 import shutil
+# For reading various file types:
+import PyPDF2
+import docx
+import openpyxl
+import zipfile
+import xml.etree.ElementTree as ET
 
 CMD_SEARCH = 'search'
 CMD_LIST = 'list'
@@ -222,6 +228,56 @@ def print_summary(title: str, results: dict):
     for line in kv_lines:
         print(line)
     print("+" + "-" * content_width + "+")
+
+def read_file(path: str) -> str:
+    """Reads the contents of a file and returns it as a string."""
+    # For certain files, use custom readers to avoid issues (e.g., permission errors, binary files, pdfs, etc.)
+    # For others, just open it up and read it as text
+    extension = os.path.splitext(path)[1].lower()
+    
+    try:
+        if extension == '.pdf':
+            with open(path, 'rb') as f:
+                reader = PyPDF2.PdfReader(f)
+                text = ''
+                for page in reader.pages:
+                    text += page.extract_text() + '\n'
+                return text
+        elif extension == '.docx':
+            doc = docx.Document(path)
+            text = '\n'.join([para.text for para in doc.paragraphs])
+            return text
+        elif extension == '.xlsx':
+            wb = openpyxl.load_workbook(path, read_only=True)
+            text = ''
+            for sheet in wb.worksheets:
+                for row in sheet.iter_rows(values_only=True):
+                    text += '\t'.join([str(cell) if cell is not None else '' for cell in row]) + '\n'
+            return text
+        elif extension == '.pptx':
+            text = []
+
+            with zipfile.ZipFile(path, 'r') as z:
+                for name in z.namelist():
+                    if name.startswith("ppt/slides/slide") and name.endswith(".xml"):
+                        data = z.read(name)
+
+                        root = ET.fromstring(data)
+
+                        # PowerPoint text nodes
+                        for elem in root.iter():
+                            if elem.tag.endswith('}t'):
+                                if elem.text:
+                                    text.append(elem.text)
+
+            return "\n".join(text)
+
+        else:
+            with open(path, 'r', encoding='utf-8') as f:
+                return f.read()
+    except Exception as e:
+        print(f'Could not read file {path}: {e}')
+        return ''
 
 def main():
     parser = argparse.ArgumentParser('FileBuddy', f'fb [{"|".join(COMMANDS)}] [options] [-p pattern] [-d directory] [-r recursive] [-o output] [-a all] [-v verbose] [-y --yes] [-h help]')
@@ -488,30 +544,28 @@ def main():
                 # if contents pattern, and file does not match, skip it
                 hits = 0
                 if contentPattern:
-                    try:
-                        with open(full_path, 'r', encoding='utf-8') as f:
-                            contents = f.read().splitlines()
-                            for i, line in enumerate(contents):
-                                match_obj = re.search(contentPattern, line)
-                                if match_obj:                              
-                                    if not printedFileName:
-                                        # print the file name
-                                        print_output(f'{full_path}{{}}')
-                                        printedFileName = True
-                                    hits += 1
-                                    # print the line with match highlighted
-                                    before, match_text, after = split_match(match_obj)
-                                    print_output(f'    {i + 1}: {before}{{}}{after}', match_text, wrapColor=INFO_COLOR)
-                    except Exception as e:
-                        print_error(f'Could not read file {full_path}: {e}')
-                        continue
+                    contents = read_file(full_path).splitlines()
+                    for i, line in enumerate(contents):
+                        match_obj = re.search(contentPattern, line)
+                        if match_obj:                              
+                            if not printedFileName:
+                                # print the file name
+                                print_output(f'{full_path}{{}}')
+                                printedFileName = True
+                            hits += 1
+                            # print the line with match highlighted
+                            before, match_text, after = split_match(match_obj)
+                            print_output(f'    {i + 1}: {before}{{}}{after}', match_text, wrapColor=INFO_COLOR)
                 
                 if printedFileName:
                     # add to results
                     results_contents[full_path] = hits
             if not recursive:
                 break
+        # Add to summary table and hits table
         tables.append(('Summary', {'Directories Searched': results_count, 'Directories Found': len(results_contents), 'Files Found': len(results_names), 'Hits Found': sum(results_contents.values())}))
+        # Remove any hits with zero count
+        results_contents = {k: v for k, v in results_contents.items() if v > 0}
         tables.append(('Hits', results_contents))
     elif command == CMD_LIST:
         # contents pattern given in the options
