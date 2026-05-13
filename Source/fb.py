@@ -310,15 +310,16 @@ def main():
     optionsCount = len(options)
     
     # get pattern, if none, default to all files
-    pattern = getattr(args, 'pattern', None)
-    if pattern is None:
-        pattern = '.*'
-    # if pattern is a regex, compile it
-    try:
-        re.compile(pattern)
-    except re.error as e:
-        print(f"Invalid regex pattern '{pattern}': {e}")
-        sys.exit(1)
+    patternStr = getattr(args, 'pattern', None)
+    if patternStr is not None:
+        # if pattern is a regex, compile it
+        try:
+            pattern = re.compile(patternStr)
+        except re.error as e:
+            print(f"Invalid regex pattern '{patternStr}': {e}")
+            sys.exit(1)
+    else:
+        pattern = None
     
     # get directory and set it to current directory if not specified
     directory = getattr(args, 'directory', None)
