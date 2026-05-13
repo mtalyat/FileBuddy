@@ -222,13 +222,13 @@ def get_byte_string(num_bytes: int) -> str:
 
 def print_summary(title: str, results: dict):
     """Prints a summary of values with a title."""
+    # Do nothing if empty
+    if not results or len(results) == 0:
+        return
+
     # Prepare key-value lines and find max width
-    if results:
-        max_key_len = max(len(str(k)) for k in results.keys())
-        max_val_len = max(len(str(v)) for v in results.values())
-    else:
-        max_key_len = 0
-        max_val_len = 0
+    max_key_len = max(len(str(k)) for k in results.keys())
+    max_val_len = max(len(str(v)) for v in results.values())
     dots_min = 3
     side_space = 2  # 1 space on each side
 
@@ -1140,7 +1140,6 @@ def main():
     if showSummary:
         for title, results in tables:
             print_summary(title, results)
-            print() # Spacing between tables
 
     # close output file
     if output_file is not None:
