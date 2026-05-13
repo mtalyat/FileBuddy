@@ -55,3 +55,4 @@ It is recommended to use `-a` with `size` to ensure you get the proper sizes of 
 | `-a`, `--all` | `-a` | Includes hidden directories and files in the search. |
 | `-v`, `--verbose` | `-v` | Outputs additional information for some commands. |
 | `-y`, `--yes` | `-y` | Automatically confirms all confirmation prompts. |
+| `-s`, `--summary` | `-s` | Prints a summary result table after the operation has completed. |
