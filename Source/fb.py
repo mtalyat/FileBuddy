@@ -5,12 +5,6 @@ import re
 import time
 import threading
 import shutil
-# For reading various file types:
-import PyPDF2
-import docx
-import openpyxl
-import zipfile
-import xml.etree.ElementTree as ET
 
 CMD_SEARCH = 'search'
 CMD_LIST = 'list'
@@ -289,6 +283,7 @@ def read_file(path: str) -> str:
     
     try:
         if extension == EXT_PDF:
+            import PyPDF2
             with open(path, 'rb') as f:
                 reader = PyPDF2.PdfReader(f)
                 text = ''
@@ -296,10 +291,12 @@ def read_file(path: str) -> str:
                     text += page.extract_text() + '\n'
                 return text
         elif extension == EXT_WORD:
+            import docx
             doc = docx.Document(path)
             text = '\n'.join([para.text for para in doc.paragraphs])
             return text
         elif extension == EXT_EXCEL:
+            import openpyxl
             wb = openpyxl.load_workbook(path, read_only=True)
             text = ''
             for sheet in wb.worksheets:
@@ -307,6 +304,8 @@ def read_file(path: str) -> str:
                     text += '\t'.join([str(cell) if cell is not None else '' for cell in row]) + '\n'
             return text
         elif extension == EXT_POWERPOINT:
+            import zipfile
+            import xml.etree.ElementTree as ET
             text = []
 
             with zipfile.ZipFile(path, 'r') as z:
