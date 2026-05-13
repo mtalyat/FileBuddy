@@ -526,11 +526,8 @@ def main():
     # run different commands
     if command == CMD_SEARCH:
         # contents pattern given in the options
-        if optionsCount < 1:
-            print(f'No search parameters given. Give a regex pattern to search file contents.')
-            sys.exit(1)
-        if optionsCount > 1:
-            print(f'Too many search parameters given. Give a regex pattern to search file contents.')
+        if optionsCount != 1:
+            print(f'{CMD_SEARCH} usage: fb {CMD_SEARCH} <content_pattern> [flags]')
             sys.exit(1)
 
         # get search parameters, if any
@@ -626,7 +623,7 @@ def main():
     elif command == CMD_LIST:
         # contents pattern given in the options
         if optionsCount > 0:
-            print(f'Too many search parameters given. Expecting no options.')
+            print(f'{CMD_LIST} usage: fb {CMD_LIST} [flags]')
             sys.exit(1)
 
         # search all files and directories by walking through them
@@ -689,7 +686,7 @@ def main():
     elif command == CMD_SIZE:
         # contents pattern given in the options
         if optionsCount > 0:
-            print(f'Too many search parameters given. Expecting no options.')
+            print(f'{CMD_SIZE} usage: fb {CMD_SIZE} [flags]')
             sys.exit(1)
 
         # search all files and directories by walking through them
@@ -777,11 +774,8 @@ def main():
         tables.append(('Summary', {}))
     elif command == CMD_RENAME:
         # check options
-        if optionsCount < 1:
-            print(f'Not enough options given. Expecting 1 option: <new_name>')
-            sys.exit(1)
-        if optionsCount > 1:
-            print(f'Too many options given. Expecting 1 option: <new_name>')
+        if optionsCount != 1:
+            print(f'{CMD_RENAME} usage: fb {CMD_RENAME} <new_name> [flags]')
             sys.exit(1)
 
         new_name = options[0]
@@ -841,7 +835,7 @@ def main():
     elif command == CMD_DELETE:
         # check options
         if optionsCount > 0:
-            print(f'Too many options given. Expecting no options.')
+            print(f'{CMD_DELETE} usage: fb {CMD_DELETE} [flags]')
             sys.exit(1)
 
         def delete_file(path: str) -> bool:
@@ -939,11 +933,8 @@ def main():
         tables.append(('Summary', {"Directories deleted: ": results[0], "Files deleted: ": results[1]}))
     elif command == CMD_COPY:
         # check options
-        if optionsCount < 1:
-            print(f'Not enough options given. Expecting 1 option: <output_dir|output_file>')
-            sys.exit(1)
-        if optionsCount > 1:
-            print(f'Too many options given. Expecting 1 option: <output_dir|output_file>')
+        if optionsCount != 1:
+            print(f'{CMD_COPY} usage: fb {CMD_COPY} <output_dir|output_file> [flags]')
             sys.exit(1)
 
         output_path = options[0]
@@ -1034,11 +1025,8 @@ def main():
         tables.append(('Summary', {"Directories copied: ": results[0], "Files copied: ": results[1]}))
     elif command == CMD_MOVE:
         # check options
-        if optionsCount < 1:
-            print(f'Not enough options given. Expecting 1 option: <output_dir|output_file>')
-            sys.exit(1)
-        if optionsCount > 1:
-            print(f'Too many options given. Expecting 1 option: <output_dir|output_file>')
+        if optionsCount != 1:
+            print(f'{CMD_MOVE} usage: fb {CMD_MOVE} <output_dir|output_file> [flags]')
             sys.exit(1)
 
         output_path = options[0]
