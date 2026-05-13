@@ -290,6 +290,7 @@ def main():
     parser.add_argument('-a', '--all', action='store_true', help='Include hidden files in the search')
     parser.add_argument('-y', '--yes', action='store_true', help='Automatically confirm prompts (e.g., for deletion)')
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
+    parser.add_argument('-s', '--summary', action='store_true', help='Print a summary of results at the end')
 
     if(len(sys.argv) <= 1):
         parser.print_help()
@@ -335,7 +336,7 @@ def main():
     hidden = getattr(args, 'all', False)
     verbose = getattr(args, 'verbose', False)
     autoConfirm = getattr(args, 'yes', False)
-
+    showSummary = getattr(args, 'summary', False)
     # get output file, if any
     output_file = getattr(args, 'output', None)
     if output_file is not None:
@@ -1082,9 +1083,10 @@ def main():
     # add elapsed time to first table (presumable the summary)
     tables[0][1]['Elapsed Time'] = str(watch)
 
-    # print all tables
-    for title, results in tables:
-        print_summary(title, results)
+    # print all tables, if told to show summary
+    if showSummary:
+        for title, results in tables:
+            print_summary(title, results)
 
     # close output file
     if output_file is not None:
