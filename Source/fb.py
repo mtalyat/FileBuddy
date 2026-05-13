@@ -376,19 +376,20 @@ def main():
         print(message)
 
     def print_output(formatted_string: str, match = '', color=MATCH_COLOR, wrapColor = RESET_COLOR):
+        token = '{}'
         if output_file is not None:
             # do not add color to output file
-            message = formatted_string.format(match)
+            message = formatted_string.replace(token, match, 1)
             output_file.write(message + '\n')
         else:
             # format the message with color
-            message = formatted_string.format(f'{color}{match}{wrapColor}')
+            message = formatted_string.replace(token, f'{color}{match}{wrapColor}', 1)
 
             # truncate the message if it is too long for the terminal
             term_width = get_terminal_width()
             if len(message) > term_width:
                 # if match is visible, account for the color codes
-                if formatted_string.index('{}') < term_width - 3:
+                if token in formatted_string and formatted_string.index(token) < term_width - 3:
                     # truncate the message to fit in the terminal
                     message = message[:term_width - 3 - len(color) - len(wrapColor)] + '...'
                 else:
