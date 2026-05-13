@@ -28,6 +28,58 @@ SUCCESS_COLOR = '\033[32m' # Green
 INFO_COLOR = '\033[90m' # Gray
 RESET_COLOR = '\033[0m' # Reset
 
+EXT_PDF = '.pdf'
+EXT_WORD = '.docx'
+EXT_EXCEL = '.xlsx'
+EXT_POWERPOINT = '.pptx'
+EXT_IGNORE = {
+    '.exe', 
+    '.dll',
+    '.bin',
+    '.dat',
+    '.iso',
+    '.img',
+    '.zip',
+    '.tar',
+    '.gz',
+    '.7z',
+    '.rar',
+    '.mp4',
+    '.mp3',
+    '.avi',
+    '.mkv',
+    '.flv',
+    '.mov',
+    '.wmv',
+    '.iso',
+    '.dmg',
+    '.vmdk',
+    '.vhd',
+    '.vhdx',
+    '.jpg',
+    '.jpeg',
+    '.png',
+    '.gif',
+    '.bmp',
+    '.svg',
+    '.webp',
+    '.psd',
+    '.ai',
+    '.eps',
+    '.ttf',
+    '.otf',
+    '.woff',
+    '.woff2',
+    '.eot',
+    '.ico',
+    '.lnk',
+    '.sys',
+    '.drv',
+    '.msi',
+    '.com',
+    '.scr',
+    '.pif'}
+
 class Stopwatch:
     start_time: float
     elapsed_time: float
@@ -236,25 +288,25 @@ def read_file(path: str) -> str:
     extension = os.path.splitext(path)[1].lower()
     
     try:
-        if extension == '.pdf':
+        if extension == EXT_PDF:
             with open(path, 'rb') as f:
                 reader = PyPDF2.PdfReader(f)
                 text = ''
                 for page in reader.pages:
                     text += page.extract_text() + '\n'
                 return text
-        elif extension == '.docx':
+        elif extension == EXT_WORD:
             doc = docx.Document(path)
             text = '\n'.join([para.text for para in doc.paragraphs])
             return text
-        elif extension == '.xlsx':
+        elif extension == EXT_EXCEL:
             wb = openpyxl.load_workbook(path, read_only=True)
             text = ''
             for sheet in wb.worksheets:
                 for row in sheet.iter_rows(values_only=True):
                     text += '\t'.join([str(cell) if cell is not None else '' for cell in row]) + '\n'
             return text
-        elif extension == '.pptx':
+        elif extension == EXT_POWERPOINT:
             text = []
 
             with zipfile.ZipFile(path, 'r') as z:
@@ -271,7 +323,8 @@ def read_file(path: str) -> str:
                                     text.append(elem.text)
 
             return "\n".join(text)
-
+        elif extension in EXT_IGNORE:
+            return ''
         else:
             with open(path, 'r', encoding='utf-8') as f:
                 return f.read()
@@ -1087,6 +1140,7 @@ def main():
     if showSummary:
         for title, results in tables:
             print_summary(title, results)
+            print() # Spacing between tables
 
     # close output file
     if output_file is not None:
