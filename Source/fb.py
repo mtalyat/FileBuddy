@@ -73,7 +73,7 @@ EXT_IGNORE = {
     '.com',
     '.scr',
     '.pif'}
-
+    
 class Stopwatch:
     start_time: float
     elapsed_time: float
@@ -331,8 +331,8 @@ def read_file(path: str) -> str:
         print(f'Could not read file {path}: {e}')
         return ''
 
-def main():
-    parser = argparse.ArgumentParser('FileBuddy', f'fb [{"|".join(COMMANDS)}] [options] [-p pattern] [-d directory] [-r recursive] [-o output] [-a all] [-v verbose] [-y --yes] [-h help]')
+def main(args):
+    parser = argparse.ArgumentParser('FileBuddy', f'fb [{"|".join(COMMANDS)}] [options] [flags]')
     parser.add_argument('command', choices=COMMANDS, help='Command to execute')
     parser.add_argument('options', nargs='*', help='Options for the command')
     parser.add_argument('-p', '--pattern', type=str, help='File pattern to search for')
@@ -343,21 +343,22 @@ def main():
     parser.add_argument('-y', '--yes', action='store_true', help='Automatically confirm prompts (e.g., for deletion)')
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
     parser.add_argument('-s', '--summary', action='store_true', help='Print a summary of results at the end')
+    parser.add_argument('--nocolor', action='store_true', help='Disable color in the output.')
 
-    if(len(sys.argv) <= 1):
+    if(len(args) <= 1):
         parser.print_help()
-        sys.exit(1)
+        return 1
 
-    args = parser.parse_args()
+    args = parser.parse_args(args)
 
     command = getattr(args, 'command', None)
     if command is None:
         print("No command specified. Use -h for help.")
-        sys.exit(1)
+        return 1
 
     if command not in COMMANDS:
         print(f"Unknown command: {command}. Use -h for help.")
-        sys.exit(1)
+        return 1
     
     options = getattr(args, 'options', [])
     optionsCount = len(options)
@@ -389,6 +390,7 @@ def main():
     verbose = getattr(args, 'verbose', False)
     autoConfirm = getattr(args, 'yes', False)
     showSummary = getattr(args, 'summary', False)
+    noColors = getattr(args, 'nocolor', False)
     # get output file, if any
     output_file = getattr(args, 'output', None)
     if output_file is not None:
@@ -430,6 +432,10 @@ def main():
         print(message)
 
     def print_output(formatted_string: str, match = '', color=MATCH_COLOR, wrapColor = RESET_COLOR):
+        nonlocal noColors
+        if noColors:
+            color = ''
+            wrapColor = ''
         token = '{}'
         if output_file is not None:
             # do not add color to output file
@@ -1019,14 +1025,14 @@ def main():
 
         if results is None:
             print_output('Operation cancelled.')
-            sys.exit(0)
+            return 0
 
         tables.append(('Summary', {"Directories copied: ": results[0], "Files copied: ": results[1]}))
     elif command == CMD_MOVE:
         # check options
         if optionsCount != 1:
             print(f'{CMD_MOVE} usage: fb {CMD_MOVE} <output_dir|output_file> [flags]')
-            sys.exit(1)
+            return 1
 
         output_path = options[0]
 
@@ -1131,7 +1137,9 @@ def main():
     # close output file
     if output_file is not None:
         output_file.close()
+        
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main(sys.argv))
