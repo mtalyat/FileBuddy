@@ -26,6 +26,7 @@ Going in place of `<command>`.
 | Command | Example | Description |
 | --- | --- | --- |
 | search | `fb search "\bPattern\b" -p "\.txt$"` | Searches the contents of files, using the given regex pattern. The regex pattern checks each line of all text files. |
+| `replace` | `fb replace "myTpyo" "myTypo"` | Searches the contents of files, using the given regex pattern, and replaces eatch match with the gicen replacement text. |
 | list | `fb list -r` | Lists the files and directories. |
 | size | `fb size -a` | Lists the sizes of each file and directory. |
 | rename | `fb rename "$(0).txt" -p "[a-z]+"` | Renames the files and directories. |
@@ -35,9 +36,9 @@ Going in place of `<command>`.
 
 **Notes**
 
-Only search, rename, copy and move use `<options>`.
+Only search, replace, rename, copy and move use `<options>`.
 
-For rename, copy, move, can use `$(N)` arguments in their destination names to references the groups from the `-p` regex pattern. For example, `$(0)` will be replaced with the whole pattern match, and `$(1)` will be replaced with the first capturing group, etc.
+For replace, rename, copy, move, can use `$(N)` arguments in their destination names to references the groups from the regex pattern. For example, `$0` will be replaced with the whole pattern match, and `$1` will be replaced with the first capturing group, etc.
 
 For rename, copy, move, and delete, you must can use the `-y` argument to skip the confirmation.
 
@@ -56,3 +57,4 @@ It is recommended to use `-a` with `size` to ensure you get the proper sizes of 
 | `-v`, `--verbose` | `-v` | Outputs additional information for some commands. |
 | `-y`, `--yes` | `-y` | Automatically confirms all confirmation prompts. |
 | `-s`, `--summary` | `-s` | Prints a summary result table after the operation has completed. |
+| `--nocolor` | `--nocolor` | Removes the ANSI color codes from the printed output. Log file outputs (when using -o) never have ANSI codes. |

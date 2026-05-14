@@ -7,13 +7,14 @@ import threading
 import shutil
 
 CMD_SEARCH = 'search'
+CMD_REPLACE = 'replace'
 CMD_LIST = 'list'
 CMD_SIZE = 'size'
 CMD_RENAME = 'rename'
 CMD_DELETE = 'delete'
 CMD_COPY = 'copy'
 CMD_MOVE = 'move'
-COMMANDS = [CMD_SEARCH, CMD_LIST, CMD_SIZE, CMD_RENAME, CMD_DELETE, CMD_COPY, CMD_MOVE]
+COMMANDS = [CMD_SEARCH, CMD_REPLACE, CMD_LIST, CMD_SIZE, CMD_RENAME, CMD_DELETE, CMD_COPY, CMD_MOVE]
 
 MATCH_COLOR = '\033[33m' # Yellow
 FILE_COLOR = '\033[36m' # Cyan
@@ -371,7 +372,7 @@ def main(args):
             pattern = re.compile(patternStr)
         except re.error as e:
             print(f"Invalid regex pattern '{patternStr}': {e}")
-            sys.exit(1)
+            return 1
     else:
         pattern = None
     
@@ -380,7 +381,7 @@ def main(args):
     if directory is not None:
         if not os.path.isdir(directory):
             print(f"Directory '{directory}' does not exist.")
-            sys.exit(1)
+            return 1
         else:
             os.chdir(directory)
 
@@ -398,29 +399,19 @@ def main(args):
             output_file = open(output_file, 'w')
         except Exception as e:
             print(f"Could not open output file '{output_file}': {e}")
-            sys.exit(1)
+            return 1
     else:
         output_file = None
 
     tables: list[tuple[str, dict]] = list()
 
     # get spinner message
-    spinnerMessage = ''
-    if command == CMD_SEARCH:
-        spinnerMessage = 'Searching...'
-    elif command == CMD_LIST:
-        spinnerMessage = 'Listing...'
-    elif command == CMD_SIZE:
-        spinnerMessage = 'Sizing...'
-    elif command == CMD_RENAME:
-        spinnerMessage = 'Renaming...'
-    elif command == CMD_DELETE:
-        spinnerMessage = 'Deleting...'
-    elif command == CMD_COPY:
-        spinnerMessage = 'Copying...'
-    elif command == CMD_MOVE:
-        spinnerMessage = 'Moving...'
-
+    spinnerMessage = command
+    if spinnerMessage.endswith('e'):
+        spinnerMessage = spinnerMessage[:-1]
+    spinnerMessage = spinnerMessage.title() + '...'
+    
+    # create spinner
     spinner = Spinner(spinnerMessage)
     spinner.start()
 
@@ -436,6 +427,9 @@ def main(args):
         if noColors:
             color = ''
             wrapColor = ''
+            resetColor = ''
+        else:
+            resetColor = RESET_COLOR
         token = '{}'
         if output_file is not None:
             # do not add color to output file
@@ -455,9 +449,10 @@ def main(args):
                 else:
                     # account for color codes
                     message = message[:term_width - 3] + '...'
-            print_safe(f'{wrapColor}{message}{RESET_COLOR}')
+            print_safe(f'{wrapColor}{message}{resetColor}')
 
     def print_error(message):
+        nonlocal verbose, noColors
         # if not verbose output, ignore errors
         if not verbose:
             return
@@ -467,11 +462,14 @@ def main(args):
         if output_file is not None:
             # do not add color to output file
             output_file.write(f'{message}\n')
+        elif noColors:
+            print_safe(message)
         else:
             # format the message with color
             print_safe(f'{ERROR_COLOR}{message}{RESET_COLOR}')
     
     def print_info(message):
+        nonlocal verbose, noColors
         # if not verbose output, ignore info messages
         if not verbose:
             return
@@ -481,6 +479,8 @@ def main(args):
         if output_file is not None:
             # do not add color to output file
             output_file.write(f'{message}\n')
+        elif noColors:
+            print_safe(message)
         else:
             # format the message with color
             print_safe(f'{INFO_COLOR}{message}{RESET_COLOR}')
@@ -533,7 +533,7 @@ def main(args):
         # contents pattern given in the options
         if optionsCount != 1:
             print(f'{CMD_SEARCH} usage: fb {CMD_SEARCH} <content_pattern> [flags]')
-            sys.exit(1)
+            return 1
 
         # get search parameters, if any
         namePattern = pattern
@@ -543,7 +543,7 @@ def main(args):
             re.compile(contentPattern)
         except re.error as e:
             print(f"Invalid regex pattern '{contentPattern}': {e}")
-            sys.exit(1)
+            return 1
 
         # search all files and directories by walking through them
         results_names = list()
@@ -625,11 +625,190 @@ def main(args):
         # Remove any hits with zero count
         results_contents = {k: v for k, v in results_contents.items() if v > 0}
         tables.append(('Hits', results_contents))
+    elif command == CMD_REPLACE:
+        # check options
+        if optionsCount != 2:
+            print(f'{CMD_REPLACE} usage: fb {CMD_REPLACE} <search_pattern> <replacement> [flags]')
+            return 1
+        
+        searchPattern = options[0]
+        replacementPattern = options[1]
+        
+        # validate regex
+        try:
+            regex = re.compile(searchPattern)
+        except re.error as e:
+            print_error(f"Invalid regex pattern '{searchPattern}': {e}")
+            return 1
+        
+        
+        def regex_replace(match_obj: re.Match, replacement: str) -> str:
+            """
+            Replace:
+                $0 => entire match
+                $1 => first capture group
+                $2 => second capture group
+                etc.
+            """
+        
+            def repl(m):
+                group_num = int(m.group(1))
+        
+                try:
+                    if group_num == 0:
+                        return match_obj.group(0)
+        
+                    return match_obj.group(group_num) or ''
+                except IndexError:
+                    return ''
+        
+            return re.sub(r'\$(\d+)', repl, replacement)
+        
+        
+        def replace_file(path: str, new_contents: str) -> bool:
+            try:
+                print_info(f'Replacing contents: {path}')
+        
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write(new_contents)
+        
+                print_output(f'Replaced: {path}')
+                return True
+        
+            except Exception as e:
+                print_error(f'Could not replace contents in {path}: {e}')
+                return False
+        
+        
+        # UPDATED: include change count in confirmation display
+        replaceAction = Action(
+            'Replace Contents',
+            '{} ({} changes)',
+            replace_file,
+            [],
+            []
+        )
+        
+        results_hits = dict()
+        
+        # walk files
+        for root, dirs, files in os.walk(directory):
+        
+            root = fix_path(root)
+        
+            # ignore hidden directories
+            if not hidden and '/.' in root:
+                continue
+        
+            print_info(f'Searching "{root}"')
+        
+            for file in files:
+        
+                # ignore hidden files
+                if not hidden and file.startswith('.'):
+                    continue
+        
+                full_path = f'{root}/{file}'
+        
+                try:
+                    contents = read_file(full_path)
+                except Exception as e:
+                    print_error(f'Could not read file "{full_path}": {e}')
+                    continue
+        
+                lines = contents.splitlines()
+        
+                new_lines = []
+                file_hits = 0
+                changed = False
+                printedFileName = False   # NEW
+        
+                for i, line in enumerate(lines):
+        
+                    matches = list(regex.finditer(line))
+        
+                    if not matches:
+                        new_lines.append(line)
+                        continue
+        
+                    new_line = line
+        
+                    # process replacements left-to-right
+                    offset = 0
+        
+                    for match_obj in matches:
+        
+                        replacement = regex_replace(match_obj, replacementPattern)
+        
+                        start, end = match_obj.span()
+        
+                        start += offset
+                        end += offset
+        
+                        original_text = new_line[start:end]
+        
+                        new_line = (
+                            new_line[:start] +
+                            replacement +
+                            new_line[end:]
+                        )
+        
+                        offset += len(replacement) - len(original_text)
+        
+                        file_hits += 1
+                        changed = True
+        
+                        # PRINT FILE NAME ONLY ONCE
+                        if not printedFileName:
+                            print_output(f'{full_path}')
+                            printedFileName = True
+        
+                        # preview replacement
+                        print_output(
+                            f'    Line {i + 1}: "{original_text}" => "{replacement}"',
+                            wrapColor=INFO_COLOR
+                        )
+        
+                    new_lines.append(new_line)
+        
+                if changed:
+        
+                    new_contents = '\n'.join(new_lines)
+        
+                    # UPDATED: store file_hits so confirmation can display it
+                    replaceAction.specific.append([
+                        full_path,
+                        file_hits,
+                        new_contents
+                    ])
+        
+                    results_hits[full_path] = file_hits
+        
+            if not recursive:
+                break
+        
+        
+        # run actions
+        results = run_actions(autoConfirm, [replaceAction])
+        
+        if results is None:
+            print_output('Operation cancelled.')
+            return 0
+        
+        tables.append((
+            'Summary',
+            {
+                'Files Modified': results[0],
+                'Total Replacements': sum(results_hits.values())
+            }
+        ))
+        
+        tables.append(('Hits', results_hits))
     elif command == CMD_LIST:
         # contents pattern given in the options
         if optionsCount > 0:
             print(f'{CMD_LIST} usage: fb {CMD_LIST} [flags]')
-            sys.exit(1)
+            return 1
 
         # search all files and directories by walking through them
         results_file_count = 0
@@ -692,7 +871,7 @@ def main(args):
         # contents pattern given in the options
         if optionsCount > 0:
             print(f'{CMD_SIZE} usage: fb {CMD_SIZE} [flags]')
-            sys.exit(1)
+            return 1
 
         # search all files and directories by walking through them
         results_sizes: dict[str, int] = dict()
@@ -781,7 +960,7 @@ def main(args):
         # check options
         if optionsCount != 1:
             print(f'{CMD_RENAME} usage: fb {CMD_RENAME} <new_name> [flags]')
-            sys.exit(1)
+            return 1
 
         new_name = options[0]
 
@@ -834,14 +1013,14 @@ def main(args):
 
         if results is None:
             print_output('Operation cancelled.')
-            sys.exit(0)
+            return 0
 
         tables.append(('Summary', {"Directories renamed: ": results[0], "Files renamed: ": results[1]}))
     elif command == CMD_DELETE:
         # check options
         if optionsCount > 0:
             print(f'{CMD_DELETE} usage: fb {CMD_DELETE} [flags]')
-            sys.exit(1)
+            return 1
 
         def delete_file(path: str) -> bool:
             try:
@@ -940,7 +1119,7 @@ def main(args):
         # check options
         if optionsCount != 1:
             print(f'{CMD_COPY} usage: fb {CMD_COPY} <output_dir|output_file> [flags]')
-            sys.exit(1)
+            return 1
 
         output_path = options[0]
 
@@ -1119,7 +1298,7 @@ def main(args):
 
         if results is None:
             print_output('Operation cancelled.')
-            sys.exit(0)
+            return 0
 
         tables.append(('Summary', {"Directories moved: ": results[0], "Files moved: ": results[1]}))
 
