@@ -350,7 +350,7 @@ def main(args):
         parser.print_help()
         return 1
 
-    args = parser.parse_args(args)
+    args = parser.parse_args(args[1:]) # Skip the file path
 
     command = getattr(args, 'command', None)
     if command is None:
