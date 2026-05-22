@@ -708,6 +708,7 @@ def main(args):
         
         searchPattern = options[0]
         replacementPattern = options[1]
+        namePattern = pattern
         
         # validate regex
         try:
@@ -715,6 +716,26 @@ def main(args):
         except re.error as e:
             print_error(f"Invalid regex pattern '{searchPattern}': {e}")
             return 1
+
+        def decode_replacement_escapes(text: str) -> str:
+            """Converts common escaped sequences (e.g. \\n, \\t) into characters."""
+            escapes = {
+                'n': '\n',
+                't': '\t',
+                'r': '\r',
+                'b': '\b',
+                'f': '\f',
+                'v': '\v',
+                '\\': '\\',
+            }
+
+            def repl(match):
+                token = match.group(1)
+                return escapes.get(token, f'\\{token}')
+
+            return re.sub(r'\\(.)', repl, text)
+
+        replacementTemplate = decode_replacement_escapes(replacementPattern)
         
         
         def regex_replace(match_obj: re.Match, replacement: str) -> str:
@@ -782,6 +803,10 @@ def main(args):
                 # ignore hidden files
                 if not hidden and file.startswith('.'):
                     continue
+
+                # if name pattern is provided, file name must match it
+                if namePattern and not re.search(namePattern, file):
+                    continue
         
                 full_path = f'{root}/{file}'
         
@@ -797,7 +822,7 @@ def main(args):
 
                 def replace_match(match_obj: re.Match) -> str:
                     nonlocal file_hits, changed, printedFileName
-                    replacement = regex_replace(match_obj, replacementPattern)
+                    replacement = regex_replace(match_obj, replacementTemplate)
                     original_text = match_obj.group(0)
                     line_number = get_line_number(contents, match_obj.start())
 
