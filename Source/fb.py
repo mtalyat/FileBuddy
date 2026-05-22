@@ -213,7 +213,9 @@ def get_byte_string(num_bytes: int) -> str:
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
         if num_bytes < 1024 or unit == 'TB':
             return f"{num_bytes:.2f} {unit}"
-        num_bytes /= 1024
+        num_bytes //= 1024
+    return 'inf' # Error
+    
 
 def print_summary(title: str, results: dict):
     """Prints a summary of values with a title."""
@@ -377,13 +379,12 @@ def main(args):
         pattern = None
     
     # get directory and set it to current directory if not specified
-    directory = getattr(args, 'directory', None)
-    if directory is not None:
-        if not os.path.isdir(directory):
-            print(f"Directory '{directory}' does not exist.")
-            return 1
-        else:
-            os.chdir(directory)
+    directory: str = str(getattr(args, 'directory', '.'))
+    if not os.path.isdir(directory):
+        print(f"Directory '{directory}' does not exist.")
+        return 1
+    else:
+        os.chdir(directory)
 
     # get flags
     recursive = getattr(args, 'recursive', False)
@@ -984,15 +985,15 @@ def main(args):
             if not hidden and '/.' in root:
                 continue
 
-            def _rename(name: str, new_name: str, action: Action) -> bool:
+            def _rename(name: str, new_name: str, action: Action):
                 # ignore hidden directories if hidden flag is not set
                 if not hidden and name.startswith('.'):
-                    return False
+                    return
 
                 # if name pattern, and directory does not match, skip it
                 match_obj = re.search(pattern, name)
                 if not match_obj:
-                    return False
+                    return
 
                 old_path = f'{root}/{name}'
                 new_path = f'{root}/{regex_sub(match_obj, new_name)}'
