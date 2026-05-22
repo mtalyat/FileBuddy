@@ -7,6 +7,8 @@ import threading
 import shutil
 
 CMD_SEARCH = 'search'
+CMD_FIND = 'find'
+CMD_EXTRACT = 'extract'
 CMD_REPLACE = 'replace'
 CMD_LIST = 'list'
 CMD_SIZE = 'size'
@@ -14,7 +16,10 @@ CMD_RENAME = 'rename'
 CMD_DELETE = 'delete'
 CMD_COPY = 'copy'
 CMD_MOVE = 'move'
-COMMANDS = [CMD_SEARCH, CMD_REPLACE, CMD_LIST, CMD_SIZE, CMD_RENAME, CMD_DELETE, CMD_COPY, CMD_MOVE]
+COMMANDS = [CMD_SEARCH, CMD_FIND, CMD_EXTRACT, CMD_REPLACE, CMD_LIST, CMD_SIZE, CMD_RENAME, CMD_DELETE, CMD_COPY, CMD_MOVE]
+COMMAND_ALIASES = {
+    CMD_FIND: CMD_SEARCH,
+}
 
 MATCH_COLOR = '\033[33m' # Yellow
 FILE_COLOR = '\033[36m' # Cyan
@@ -180,6 +185,10 @@ def split_match(match) -> tuple[str, str, str]:
     match_text = match.string[start:end]
     after = match.string[end:]
     return before, match_text, after
+
+def get_line_number(text: str, index: int) -> int:
+    """Returns the 1-based line number for a character index in text."""
+    return text.count('\n', 0, index) + 1
 
 def regex_sub(match_obj, text: str) -> str:
     """Replaces '$0' with the entire match, '$1' with group 1, etc."""
@@ -358,6 +367,8 @@ def main(args):
     if command is None:
         print("No command specified. Use -h for help.")
         return 1
+
+    command = COMMAND_ALIASES.get(command, command)
 
     if command not in COMMANDS:
         print(f"Unknown command: {command}. Use -h for help.")
@@ -541,7 +552,7 @@ def main(args):
         # try to compile the contents pattern
         contentPattern = options[0]
         try:
-            re.compile(contentPattern)
+            contentRegex = re.compile(contentPattern)
         except re.error as e:
             print(f"Invalid regex pattern '{contentPattern}': {e}")
             return 1
@@ -603,18 +614,81 @@ def main(args):
                 # if contents pattern, and file does not match, skip it
                 hits = 0
                 if contentPattern:
-                    contents = read_file(full_path).splitlines()
-                    for i, line in enumerate(contents):
-                        match_obj = re.search(contentPattern, line)
-                        if match_obj:                              
-                            if not printedFileName:
-                                # print the file name
-                                print_output(f'{full_path}{{}}')
-                                printedFileName = True
-                            hits += 1
-                            # print the line with match highlighted
-                            before, match_text, after = split_match(match_obj)
-                            print_output(f'    {i + 1}: {before}{{}}{after}', match_text, wrapColor=INFO_COLOR)
+                    contents = read_file(full_path)
+                    for match_obj in contentRegex.finditer(contents):
+                        if not printedFileName:
+                            # print the file name
+                            print_output(f'{full_path}{{}}')
+                            printedFileName = True
+
+                        hits += 1
+
+                        # Show the first line where the match starts.
+                        start, end = match_obj.span()
+                        line_number = get_line_number(contents, start)
+
+                        line_start = contents.rfind('\n', 0, start) + 1
+                        end_line_number = get_line_number(contents, max(start, end - 1))
+
+                        # For multiline matches, print each visible line inline with its line
+                        # number and highlight only the matched segment on that line.
+                        if end_line_number > line_number:
+                            line_starts = [line_start]
+                            cursor = line_start
+                            expected_lines = end_line_number - line_number + 1
+
+                            while len(line_starts) < expected_lines:
+                                next_break = contents.find('\n', cursor)
+                                if next_break == -1:
+                                    break
+                                cursor = next_break + 1
+                                line_starts.append(cursor)
+
+                            def print_line_preview(preview_line_number: int, preview_line_start: int):
+                                preview_line_end = contents.find('\n', preview_line_start)
+                                if preview_line_end == -1:
+                                    preview_line_end = len(contents)
+
+                                line_text = contents[preview_line_start:preview_line_end]
+                                start_in_line = max(0, start - preview_line_start)
+                                end_in_line = min(preview_line_end, end) - preview_line_start
+                                end_in_line = max(start_in_line, end_in_line)
+
+                                before = line_text[:start_in_line]
+                                match_text = line_text[start_in_line:end_in_line]
+                                after = line_text[end_in_line:]
+
+                                if match_text:
+                                    print_output(f'    {preview_line_number}: {before}{{}}{after}', match_text, wrapColor=INFO_COLOR)
+                                else:
+                                    print_output(f'    {preview_line_number}: {line_text}', wrapColor=INFO_COLOR)
+
+                            if len(line_starts) <= 2:
+                                for line_offset, preview_line_start in enumerate(line_starts):
+                                    print_line_preview(line_number + line_offset, preview_line_start)
+                            else:
+                                print_line_preview(line_number, line_starts[0])
+                                print_output('    ...', wrapColor=INFO_COLOR)
+                                print_line_preview(end_line_number, line_starts[-1])
+                            continue
+
+                        line_end = contents.find('\n', line_start)
+                        if line_end == -1:
+                            line_end = len(contents)
+
+                        line_text = contents[line_start:line_end]
+                        start_in_line = start - line_start
+                        end_in_line = max(start_in_line, min(end, line_end) - line_start)
+
+                        before = line_text[:start_in_line]
+                        match_text = line_text[start_in_line:end_in_line]
+                        after = line_text[end_in_line:]
+
+                        # If match starts exactly at a line break edge, fallback to raw match text preview.
+                        if not match_text:
+                            match_text = match_obj.group(0).split('\n', 1)[0]
+
+                        print_output(f'    {line_number}: {before}{{}}{after}', match_text, wrapColor=INFO_COLOR)
                 
                 if printedFileName:
                     # add to results
@@ -666,7 +740,7 @@ def main(args):
             return re.sub(r'\$(\d+)', repl, replacement)
         
         
-        def replace_file(path: str, new_contents: str) -> bool:
+        def replace_file(path: str, change_count: int, new_contents: str) -> bool:
             try:
                 print_info(f'Replacing contents: {path}')
         
@@ -716,65 +790,56 @@ def main(args):
                 except Exception as e:
                     print_error(f'Could not read file "{full_path}": {e}')
                     continue
-        
-                lines = contents.splitlines()
-        
-                new_lines = []
+
                 file_hits = 0
                 changed = False
-                printedFileName = False   # NEW
-        
-                for i, line in enumerate(lines):
-        
-                    matches = list(regex.finditer(line))
-        
-                    if not matches:
-                        new_lines.append(line)
-                        continue
-        
-                    new_line = line
-        
-                    # process replacements left-to-right
-                    offset = 0
-        
-                    for match_obj in matches:
-        
-                        replacement = regex_replace(match_obj, replacementPattern)
-        
-                        start, end = match_obj.span()
-        
-                        start += offset
-                        end += offset
-        
-                        original_text = new_line[start:end]
-        
-                        new_line = (
-                            new_line[:start] +
-                            replacement +
-                            new_line[end:]
-                        )
-        
-                        offset += len(replacement) - len(original_text)
-        
-                        file_hits += 1
-                        changed = True
-        
-                        # PRINT FILE NAME ONLY ONCE
-                        if not printedFileName:
-                            print_output(f'{full_path}')
-                            printedFileName = True
-        
-                        # preview replacement
-                        print_output(
-                            f'    Line {i + 1}: "{original_text}" => "{replacement}"',
-                            wrapColor=INFO_COLOR
-                        )
-        
-                    new_lines.append(new_line)
-        
+                printedFileName = False
+
+                def replace_match(match_obj: re.Match) -> str:
+                    nonlocal file_hits, changed, printedFileName
+                    replacement = regex_replace(match_obj, replacementPattern)
+                    original_text = match_obj.group(0)
+                    line_number = get_line_number(contents, match_obj.start())
+
+                    def preview_lines(text: str, edge_lines: int = 3) -> list[str]:
+                        normalized = text.replace('\r\n', '\n').replace('\r', '\n')
+                        lines = normalized.split('\n')
+                        if lines and lines[-1] == '':
+                            lines = lines[:-1]
+                        if len(lines) <= edge_lines * 2:
+                            return lines
+                        return lines[:edge_lines] + ['...'] + lines[-edge_lines:]
+
+                    file_hits += 1
+                    changed = True
+
+                    # PRINT FILE NAME ONLY ONCE
+                    if not printedFileName:
+                        print_output(f'{full_path}')
+                        printedFileName = True
+
+                    # preview replacement
+                    original_preview = preview_lines(original_text)
+                    replacement_preview = preview_lines(replacement)
+
+                    print_output(f'    {line_number}: from', wrapColor=INFO_COLOR)
+                    if original_preview:
+                        for preview_line in original_preview:
+                            print_output('        {}', preview_line, wrapColor=INFO_COLOR)
+                    else:
+                        print_output('        {}', '', wrapColor=INFO_COLOR)
+
+                    print_output('      to', wrapColor=INFO_COLOR)
+                    if replacement_preview:
+                        for preview_line in replacement_preview:
+                            print_output('        {}', preview_line, wrapColor=INFO_COLOR)
+                    else:
+                        print_output('        {}', '', wrapColor=INFO_COLOR)
+                    return replacement
+
+                new_contents = regex.sub(replace_match, contents)
+
                 if changed:
-        
-                    new_contents = '\n'.join(new_lines)
         
                     # UPDATED: store file_hits so confirmation can display it
                     replaceAction.specific.append([
@@ -804,6 +869,103 @@ def main(args):
             }
         ))
         
+        tables.append(('Hits', results_hits))
+    elif command == CMD_EXTRACT:
+        # contents pattern given in the options
+        if optionsCount != 1:
+            print(f'{CMD_EXTRACT} usage: fb {CMD_EXTRACT} <content_pattern> [flags]')
+            return 1
+
+        # get extract parameters, if any
+        namePattern = pattern
+        contentPattern = options[0]
+
+        try:
+            contentRegex = re.compile(contentPattern)
+        except re.error as e:
+            print(f"Invalid regex pattern '{contentPattern}': {e}")
+            return 1
+
+        results_count = 0
+        extracted_total = 0
+        extracted_files = 0
+        results_hits = dict()
+
+        for root, dirs, files in os.walk(directory):
+            root = fix_path(root)
+
+            # ignore hidden files and directories if hidden flag is not set
+            if not hidden and '/.' in root:
+                continue
+
+            results_count += 1
+            print_info(f'Searching "{root}"')
+
+            for file in files:
+                # ignore hidden files if hidden flag is not set
+                if not hidden and file.startswith('.'):
+                    continue
+
+                full_path = f'{root}/{file}'
+
+                # if name pattern, and file does not match, skip it
+                if namePattern and not re.search(namePattern, file):
+                    continue
+
+                contents = read_file(full_path)
+                file_extracts = 0
+                printedFileName = False
+
+                for match_index, match_obj in enumerate(contentRegex.finditer(contents), start=1):
+                    groups = match_obj.groups()
+                    if not groups:
+                        continue
+
+                    for group_index, group in enumerate(groups, start=1):
+                        if group is None:
+                            continue
+
+                        if not printedFileName:
+                            print_output(f'{full_path}')
+                            printedFileName = True
+
+                        group_text = str(group).replace('\r\n', '\n').replace('\r', '\n')
+                        group_lines = group_text.split('\n')
+                        if group_lines and group_lines[-1] == '':
+                            group_lines = group_lines[:-1]
+
+                        prefix = f'    {match_index}:{group_index}: '
+                        indent = ' ' * len(prefix)
+                        edge_lines = 3
+
+                        if len(group_lines) <= 1:
+                            print_output(f'{prefix}{{}}', group_text, wrapColor=INFO_COLOR)
+                        elif len(group_lines) <= edge_lines * 2:
+                            print_output(f'{prefix}{{}}', group_lines[0], wrapColor=INFO_COLOR)
+                            for preview_line in group_lines[1:]:
+                                print_output(f'{indent}{{}}', preview_line, wrapColor=INFO_COLOR)
+                        else:
+                            print_output(f'{prefix}{{}}', group_lines[0], wrapColor=INFO_COLOR)
+                            print_output(f'{indent}{{}}', group_lines[1], wrapColor=INFO_COLOR)
+                            print_output(f'{indent}...', wrapColor=INFO_COLOR)
+                            print_output(f'{indent}{{}}', group_lines[-2], wrapColor=INFO_COLOR)
+                            print_output(f'{indent}{{}}', group_lines[-1], wrapColor=INFO_COLOR)
+
+                        file_extracts += 1
+
+                if file_extracts > 0:
+                    extracted_files += 1
+                    extracted_total += file_extracts
+                    results_hits[full_path] = file_extracts
+
+            if not recursive:
+                break
+
+        tables.append(('Summary', {
+            'Directories Searched': results_count,
+            'Files With Extracts': extracted_files,
+            'Total Extracted Groups': extracted_total
+        }))
         tables.append(('Hits', results_hits))
     elif command == CMD_LIST:
         # contents pattern given in the options
