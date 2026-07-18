@@ -191,14 +191,11 @@ def get_line_number(text: str, index: int) -> int:
     return text.count('\n', 0, index) + 1
 
 def regex_sub(match_obj, text: str) -> str:
-    """Replaces '$0' with the entire match, '$1' with group 1, etc."""
-    def group_replacer(match):
-        idx = int(match.group(1))
-        try:
-            return match_obj.group(idx)
-        except IndexError:
-            return ''
-    return re.sub(r'\$(\d+)', group_replacer, text)
+    """Expands regex backreferences like '\\1' and '\\g<1>' in text."""
+    try:
+        return match_obj.expand(text)
+    except re.error:
+        return text
 
 def get_confirmation(prompt: str) -> bool:
     """Prompts the user for confirmation and returns True if confirmed, False otherwise."""
@@ -527,6 +524,7 @@ def main(args):
             else:
                 for action in actions[1:]:
                     action.print()
+            print(f'{INFO_COLOR}    Action count: {count}{RESET_COLOR}')
             if not get_confirmation("Are you sure you want to execute these actions?"):
                 cancel()
         
@@ -739,26 +737,11 @@ def main(args):
         
         
         def regex_replace(match_obj: re.Match, replacement: str) -> str:
-            """
-            Replace:
-                $0 => entire match
-                $1 => first capture group
-                $2 => second capture group
-                etc.
-            """
-        
-            def repl(m):
-                group_num = int(m.group(1))
-        
-                try:
-                    if group_num == 0:
-                        return match_obj.group(0)
-        
-                    return match_obj.group(group_num) or ''
-                except IndexError:
-                    return ''
-        
-            return re.sub(r'\$(\d+)', repl, replacement)
+            """Expands regex backreferences like '\\1' and '\\g<1>' in replacement."""
+            try:
+                return match_obj.expand(replacement)
+            except re.error:
+                return replacement
         
         
         def replace_file(path: str, change_count: int, new_contents: str) -> bool:

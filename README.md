@@ -25,24 +25,30 @@ Going in place of `<command>`.
 
 | Command | Example | Description |
 | --- | --- | --- |
-| search | `fb search "\bPattern\b" -p "\.txt$"` | Searches the contents of files, using the given regex pattern. The regex pattern checks each line of all text files. |
-| `replace` | `fb replace "myTpyo" "myTypo"` | Searches the contents of files, using the given regex pattern, and replaces eatch match with the gicen replacement text. |
+| search | `fb search "\bPattern\b" -p "\.txt$"` | Searches file contents using the given regex pattern (supports whole-file and multiline matches). |
+| find | `fb find "\bPattern\b" -p "\.txt$"` | Alias for `search`. |
+| extract | `fb extract "Hello (.*)" -p "\.txt$"` | Searches file contents and prints captured regex groups for each match. |
+| `replace` | `fb replace "myTpyo" "myTypo"` | Searches file contents with the given regex pattern and replaces each match with the replacement text (supports multiline). |
 | list | `fb list -r` | Lists the files and directories. |
 | size | `fb size -a` | Lists the sizes of each file and directory. |
-| rename | `fb rename "$(0).txt" -p "[a-z]+"` | Renames the files and directories. |
+| rename | `fb rename "\1pp" -p "^(.*)\.h$"` | Renames the files and directories. |
 | delete | `fb delete -p ".*\.txt"` | Deletes the files and directories.
 | copy | `fb copy "C:/destination" -p ".*\.txt"` | Copies the files and directories to the given destination path. |
 | move | `fb move "C:/destination" -p ".*\.txt"` | Moves the files and directories to the given destination path. |
 
 **Notes**
 
-Only search, replace, rename, copy and move use `<options>`.
+Only search/find, extract, replace, rename, copy and move use `<options>`.
 
-For replace, rename, copy, move, can use `$(N)` arguments in their destination names to references the groups from the regex pattern. For example, `$0` will be replaced with the whole pattern match, and `$1` will be replaced with the first capturing group, etc.
+For rename, copy, move, and replace, use Python-style regex backreferences in destination/replacement text, such as `\1` or `\g<1>`.
 
-For rename, copy, move, and delete, you must can use the `-y` argument to skip the confirmation.
+For replace, escaped characters in replacement text are decoded before applying backreferences. For example: `\n`, `\t`, `\r`, `\b`, `\f`, `\v`, and `\\`.
 
-It is recommended to use `-a` with `size` to ensure you get the proper sizes of directires. Otherwise, hidden sub-directories and files are ignored, which may yield invalid results. 
+For search, extract, and replace, the `-p` pattern filters file names before reading file contents.
+
+For rename, copy, move, and delete, you can use the `-y` argument to skip the confirmation.
+
+It is recommended to use `-a` with `size` to ensure you get the proper sizes of directories. Otherwise, hidden sub-directories and files are ignored, which may yield invalid results.
 
 ## Flags
 
