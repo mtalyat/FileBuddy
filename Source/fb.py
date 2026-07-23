@@ -190,12 +190,37 @@ def get_line_number(text: str, index: int) -> int:
     """Returns the 1-based line number for a character index in text."""
     return text.count('\n', 0, index) + 1
 
+def replace_match_groups(match_obj, text: str) -> str:
+    """Expands $0, $1, etc. using regex match groups."""
+    def group_replacer(match):
+        idx = int(match.group(1))
+        try:
+            group_value = match_obj.group(idx)
+            return '' if group_value is None else str(group_value)
+        except IndexError:
+            return ''
+
+    return re.sub(r'\$(\d+)', group_replacer, text)
+
 def regex_sub(match_obj, text: str) -> str:
-    """Expands regex backreferences like '\\1' and '\\g<1>' in text."""
-    try:
-        return match_obj.expand(text)
-    except re.error:
-        return text
+    """Expands regex backreferences like '$0' and '$1' in text."""
+    return replace_match_groups(match_obj, text)
+
+def apply_output_format(format_string: str, raw_value: str, match_obj = None) -> str:
+    """Formats an emitted output element where $0 is the full element and $1+ are regex groups."""
+    def group_replacer(match):
+        idx = int(match.group(1))
+        if idx == 0:
+            return raw_value
+        if match_obj is None:
+            return ''
+        try:
+            group_value = match_obj.group(idx)
+            return '' if group_value is None else str(group_value)
+        except IndexError:
+            return ''
+
+    return re.sub(r'\$(\d+)', group_replacer, format_string)
 
 def get_confirmation(prompt: str) -> bool:
     """Prompts the user for confirmation and returns True if confirmed, False otherwise."""
@@ -348,6 +373,7 @@ def main(args):
     parser.add_argument('-d', '--directory', type=str, default='.', help='Directory to operate in (default: current directory)')
     parser.add_argument('-r', '--recursive', action='store_true', help='Search recursively in subdirectories')
     parser.add_argument('-o', '--output', type=str, help='Output file to write results to')
+    parser.add_argument('-f', '--format', type=str, help='Format each emitted output element using $0 for the full string and $1+ for regex groups when available')
     parser.add_argument('-a', '--all', action='store_true', help='Include hidden files in the search')
     parser.add_argument('-y', '--yes', action='store_true', help='Automatically confirm prompts (e.g., for deletion)')
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
@@ -401,6 +427,7 @@ def main(args):
     autoConfirm = getattr(args, 'yes', False)
     showSummary = getattr(args, 'summary', False)
     noColors = getattr(args, 'nocolor', False)
+    outputFormat = getattr(args, 'format', None)
     # get output file, if any
     output_file = getattr(args, 'output', None)
     if output_file is not None:
@@ -431,8 +458,8 @@ def main(args):
         spinner.clear()
         print(message)
 
-    def print_output(formatted_string: str, match = '', color=MATCH_COLOR, wrapColor = RESET_COLOR):
-        nonlocal noColors
+    def print_output(formatted_string: str, match = '', color=MATCH_COLOR, wrapColor = RESET_COLOR, raw_value: str | None = None, match_obj = None, apply_format: bool = True):
+        nonlocal noColors, outputFormat
         if noColors:
             color = ''
             wrapColor = ''
@@ -440,6 +467,21 @@ def main(args):
         else:
             resetColor = RESET_COLOR
         token = '{}'
+
+        if raw_value is None:
+            raw_value = formatted_string.replace(token, match, 1)
+
+        if outputFormat is not None and apply_format:
+            message = apply_output_format(outputFormat, raw_value, match_obj)
+            if output_file is not None:
+                output_file.write(message + '\n')
+            else:
+                term_width = get_terminal_width()
+                if len(message) > term_width:
+                    message = message[:term_width - 3] + '...'
+                print_safe(message)
+            return
+
         if output_file is not None:
             # do not add color to output file
             message = formatted_string.replace(token, match, 1)
@@ -583,10 +625,11 @@ def main(args):
                     match_obj = re.search(namePattern, dir)
                     if match_obj:
                         # add to results
-                        results_names.append(f'{root}/{dir}/')
+                        raw_value = f'{root}/{dir}/'
+                        results_names.append(raw_value)
                         # print the directory name with match highlighted
                         before, match_text, after = split_match(match_obj)
-                        print_output(f'{root}/{before}{{}}{after}/', match_text)
+                        print_output(f'{root}/{before}{{}}{after}/', match_text, raw_value=raw_value, match_obj=match_obj, apply_format=False)
 
             # search file names and contents if patterns are specified
             for file in files:
@@ -606,7 +649,7 @@ def main(args):
                     results_names.append(full_path)
                     # print the file name with match highlighted
                     before, match_text, after = split_match(match_obj)
-                    print_output(f'{root}/{before}{{}}{after}', match_text)
+                    print_output(f'{root}/{before}{{}}{after}', match_text, raw_value=full_path, match_obj=match_obj, apply_format=False)
                     printedFileName = True
 
                 # if contents pattern, and file does not match, skip it
@@ -616,10 +659,14 @@ def main(args):
                     for match_obj in contentRegex.finditer(contents):
                         if not printedFileName:
                             # print the file name
-                            print_output(f'{full_path}{{}}')
+                            print_output(f'{full_path}{{}}', raw_value=full_path, apply_format=False)
                             printedFileName = True
 
                         hits += 1
+
+                        if outputFormat is not None:
+                            print_output('{}', match_obj.group(0), wrapColor=INFO_COLOR, raw_value=match_obj.group(0), match_obj=match_obj)
+                            continue
 
                         # Show the first line where the match starts.
                         start, end = match_obj.span()
@@ -657,16 +704,18 @@ def main(args):
                                 after = line_text[end_in_line:]
 
                                 if match_text:
-                                    print_output(f'    {preview_line_number}: {before}{{}}{after}', match_text, wrapColor=INFO_COLOR)
+                                    raw_value = f'    {preview_line_number}: {line_text}'
+                                    print_output(f'    {preview_line_number}: {before}{{}}{after}', match_text, wrapColor=INFO_COLOR, raw_value=raw_value, match_obj=match_obj)
                                 else:
-                                    print_output(f'    {preview_line_number}: {line_text}', wrapColor=INFO_COLOR)
+                                    raw_value = f'    {preview_line_number}: {line_text}'
+                                    print_output(f'    {preview_line_number}: {line_text}', wrapColor=INFO_COLOR, raw_value=raw_value, match_obj=match_obj)
 
                             if len(line_starts) <= 2:
                                 for line_offset, preview_line_start in enumerate(line_starts):
                                     print_line_preview(line_number + line_offset, preview_line_start)
                             else:
                                 print_line_preview(line_number, line_starts[0])
-                                print_output('    ...', wrapColor=INFO_COLOR)
+                                print_output('    ...', wrapColor=INFO_COLOR, raw_value='    ...', match_obj=match_obj)
                                 print_line_preview(end_line_number, line_starts[-1])
                             continue
 
@@ -686,7 +735,8 @@ def main(args):
                         if not match_text:
                             match_text = match_obj.group(0).split('\n', 1)[0]
 
-                        print_output(f'    {line_number}: {before}{{}}{after}', match_text, wrapColor=INFO_COLOR)
+                        raw_value = f'    {line_number}: {line_text}'
+                        print_output(f'    {line_number}: {before}{{}}{after}', match_text, wrapColor=INFO_COLOR, raw_value=raw_value, match_obj=match_obj)
                 
                 if printedFileName:
                     # add to results
@@ -737,11 +787,8 @@ def main(args):
         
         
         def regex_replace(match_obj: re.Match, replacement: str) -> str:
-            """Expands regex backreferences like '\\1' and '\\g<1>' in replacement."""
-            try:
-                return match_obj.expand(replacement)
-            except re.error:
-                return replacement
+            """Expands regex backreferences like '$0' and '$1' in replacement."""
+            return replace_match_groups(match_obj, replacement)
         
         
         def replace_file(path: str, change_count: int, new_contents: str) -> bool:
@@ -823,7 +870,7 @@ def main(args):
 
                     # PRINT FILE NAME ONLY ONCE
                     if not printedFileName:
-                        print_output(f'{full_path}')
+                        print_output(f'{full_path}', apply_format=False)
                         printedFileName = True
 
                     # preview replacement
@@ -934,10 +981,16 @@ def main(args):
                             continue
 
                         if not printedFileName:
-                            print_output(f'{full_path}')
+                            print_output(f'{full_path}', raw_value=full_path, match_obj=match_obj, apply_format=False)
                             printedFileName = True
 
                         group_text = str(group).replace('\r\n', '\n').replace('\r', '\n')
+
+                        if outputFormat is not None:
+                            print_output('{}', group_text, wrapColor=INFO_COLOR, raw_value=group_text, match_obj=match_obj)
+                            file_extracts += 1
+                            continue
+
                         group_lines = group_text.split('\n')
                         if group_lines and group_lines[-1] == '':
                             group_lines = group_lines[:-1]
@@ -947,17 +1000,24 @@ def main(args):
                         edge_lines = 3
 
                         if len(group_lines) <= 1:
-                            print_output(f'{prefix}{{}}', group_text, wrapColor=INFO_COLOR)
+                            raw_value = f'{prefix}{group_text}'
+                            print_output(f'{prefix}{{}}', group_text, wrapColor=INFO_COLOR, raw_value=raw_value, match_obj=match_obj)
                         elif len(group_lines) <= edge_lines * 2:
-                            print_output(f'{prefix}{{}}', group_lines[0], wrapColor=INFO_COLOR)
+                            raw_value = f'{prefix}{group_lines[0]}'
+                            print_output(f'{prefix}{{}}', group_lines[0], wrapColor=INFO_COLOR, raw_value=raw_value, match_obj=match_obj)
                             for preview_line in group_lines[1:]:
-                                print_output(f'{indent}{{}}', preview_line, wrapColor=INFO_COLOR)
+                                raw_value = f'{indent}{preview_line}'
+                                print_output(f'{indent}{{}}', preview_line, wrapColor=INFO_COLOR, raw_value=raw_value, match_obj=match_obj)
                         else:
-                            print_output(f'{prefix}{{}}', group_lines[0], wrapColor=INFO_COLOR)
-                            print_output(f'{indent}{{}}', group_lines[1], wrapColor=INFO_COLOR)
-                            print_output(f'{indent}...', wrapColor=INFO_COLOR)
-                            print_output(f'{indent}{{}}', group_lines[-2], wrapColor=INFO_COLOR)
-                            print_output(f'{indent}{{}}', group_lines[-1], wrapColor=INFO_COLOR)
+                            raw_value = f'{prefix}{group_lines[0]}'
+                            print_output(f'{prefix}{{}}', group_lines[0], wrapColor=INFO_COLOR, raw_value=raw_value, match_obj=match_obj)
+                            raw_value = f'{indent}{group_lines[1]}'
+                            print_output(f'{indent}{{}}', group_lines[1], wrapColor=INFO_COLOR, raw_value=raw_value, match_obj=match_obj)
+                            print_output(f'{indent}...', wrapColor=INFO_COLOR, raw_value=f'{indent}...', match_obj=match_obj)
+                            raw_value = f'{indent}{group_lines[-2]}'
+                            print_output(f'{indent}{{}}', group_lines[-2], wrapColor=INFO_COLOR, raw_value=raw_value, match_obj=match_obj)
+                            raw_value = f'{indent}{group_lines[-1]}'
+                            print_output(f'{indent}{{}}', group_lines[-1], wrapColor=INFO_COLOR, raw_value=raw_value, match_obj=match_obj)
 
                         file_extracts += 1
 
@@ -1000,8 +1060,10 @@ def main(args):
                         continue
 
                     # search the name
-                    if re.search(pattern, dir):
-                        print_output(f'{root}/{dir}/')
+                    match_obj = re.search(pattern, dir)
+                    if match_obj:
+                        raw_value = f'{root}/{dir}/'
+                        print_output(raw_value, raw_value=raw_value, match_obj=match_obj)
             else:
                 # list all directories
                 for dir in dirs:
@@ -1010,7 +1072,8 @@ def main(args):
                         continue
 
                     # print the directory name
-                    print_output(f'{root}/{dir}/')
+                    raw_value = f'{root}/{dir}/'
+                    print_output(raw_value, raw_value=raw_value)
                     results_directory_count += 1
 
             # search file names and contents if patterns are specified
@@ -1027,13 +1090,13 @@ def main(args):
                     if not match_obj:
                         continue
                     
-                    print_output(f'{root}/{file}')
+                    print_output(f'{root}/{file}', raw_value=full_path, match_obj=match_obj)
                     results_file_count += 1
                 else: 
                     # list all files
 
                     # print the file name
-                    print_output(f'{root}/{file}')
+                    print_output(f'{root}/{file}', raw_value=full_path)
                     results_file_count += 1
             if not recursive:
                 break
@@ -1101,13 +1164,15 @@ def main(args):
                     continue
 
                 # if name pattern, and directory does not match, skip it
-                if pattern and not re.search(pattern, dir):
+                match_obj = re.search(pattern, dir) if pattern else None
+                if pattern and not match_obj:
                     continue
 
                 # print the directory name with size
                 full_path = f'{root}/{dir}'
                 size = results_sizes.get(full_path, 0)
-                print_output(f'{full_path}/ => {get_byte_string(size)}')
+                raw_value = f'{full_path}/ => {get_byte_string(size)}'
+                print_output(raw_value, raw_value=raw_value, match_obj=match_obj)
             
             for file in files:
                 # ignore hidden files if hidden flag is not set
@@ -1117,12 +1182,14 @@ def main(args):
                 full_path = f'{root}/{file}'
 
                 # if name pattern, and file does not match, skip it
-                if pattern and not re.search(pattern, file):
+                match_obj = re.search(pattern, file) if pattern else None
+                if pattern and not match_obj:
                     continue
 
                 # print the file name with size
                 size = results_sizes.get(full_path, 0)
-                print_output(f'{full_path} => {get_byte_string(size)}')
+                raw_value = f'{full_path} => {get_byte_string(size)}'
+                print_output(raw_value, raw_value=raw_value, match_obj=match_obj)
             
             if not recursive:
                 break

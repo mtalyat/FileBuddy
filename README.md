@@ -13,11 +13,11 @@ FileBuddy is a utility Python script, intended to make quickly modifying, search
 
 General form of command:
 
-    fb <command> <options> [-p pattern] [-d directory] [-r recursive] [-o output] [-a hidden] [-v verbose] [-h help]
+    fb <command> <options> [-p pattern] [-d directory] [-r recursive] [-o output] [-f format] [-a hidden] [-v verbose] [-h help]
 
 OR
 
-    python fb.py <command> <options> [-p pattern] [-d directory] [-r recursive] [-o output] [-a hidden] [-v verbose] [-h help]
+    python fb.py <command> <options> [-p pattern] [-d directory] [-r recursive] [-o output] [-f format] [-a hidden] [-v verbose] [-h help]
 
 ## Commands
 
@@ -31,7 +31,7 @@ Going in place of `<command>`.
 | `replace` | `fb replace "myTpyo" "myTypo"` | Searches file contents with the given regex pattern and replaces each match with the replacement text (supports multiline). |
 | list | `fb list -r` | Lists the files and directories. |
 | size | `fb size -a` | Lists the sizes of each file and directory. |
-| rename | `fb rename "\1pp" -p "^(.*)\.h$"` | Renames the files and directories. |
+| rename | `fb rename "$1pp" -p "^(.*)\.h$"` | Renames the files and directories. |
 | delete | `fb delete -p ".*\.txt"` | Deletes the files and directories.
 | copy | `fb copy "C:/destination" -p ".*\.txt"` | Copies the files and directories to the given destination path. |
 | move | `fb move "C:/destination" -p ".*\.txt"` | Moves the files and directories to the given destination path. |
@@ -40,9 +40,9 @@ Going in place of `<command>`.
 
 Only search/find, extract, replace, rename, copy and move use `<options>`.
 
-For rename, copy, move, and replace, use Python-style regex backreferences in destination/replacement text, such as `\1` or `\g<1>`.
+For rename, copy, move, and replace, use `$0`, `$1`, `$2`, etc. in destination or replacement text, where `$0` is the full regex match and `$1+` are capture groups.
 
-For replace, escaped characters in replacement text are decoded before applying backreferences. For example: `\n`, `\t`, `\r`, `\b`, `\f`, `\v`, and `\\`.
+For replace, escaped characters in replacement text are decoded before applying group substitution. For example: `\n`, `\t`, `\r`, `\b`, `\f`, `\v`, and `\\`.
 
 For search, extract, and replace, the `-p` pattern filters file names before reading file contents.
 
@@ -59,8 +59,11 @@ It is recommended to use `-a` with `size` to ensure you get the proper sizes of 
 | `-d`, `--directory` | `-d "../Source"` | Defines the working directory. Defaults to `.`. |
 | `-r`, `--recursive` | `-r` | If given, the operations on directories will be recursive. |
 | `-o`, `--output` | `-o "log.txt"` | If given, all output will be redirected to a file. If not given, the output is printed in the terminal. |
+| `-f`, `--format` | `-f "($0)"` | If given, formats each emitted output element. Use `$0` for the full emitted string and `$1`, `$2`, etc. for regex capture groups when the element comes from a regex match. |
 | `-a`, `--all` | `-a` | Includes hidden directories and files in the search. |
 | `-v`, `--verbose` | `-v` | Outputs additional information for some commands. |
 | `-y`, `--yes` | `-y` | Automatically confirms all confirmation prompts. |
 | `-s`, `--summary` | `-s` | Prints a summary result table after the operation has completed. |
 | `--nocolor` | `--nocolor` | Removes the ANSI color codes from the printed output. Log file outputs (when using -o) never have ANSI codes. |
+
+When `-f` is omitted, commands keep their current output format.
