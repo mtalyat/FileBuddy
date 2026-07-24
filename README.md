@@ -58,7 +58,7 @@ It is recommended to use `-a` with `size` to ensure you get the proper sizes of 
 | `-p`, `--pattern` | `-p "\d+"` | Defines what regex pattern to use to filter the files and directories. Defaults to use all files and directories within the working directory. |
 | `-d`, `--directory` | `-d "../Source"` | Defines the working directory. Defaults to `.`. |
 | `-r`, `--recursive` | `-r` | If given, the operations on directories will be recursive. |
-| `-o`, `--output` | `-o "log.txt"` | If given, all output will be redirected to a file. If not given, the output is printed in the terminal. |
+| `-o`, `--output` | `-o "log.txt"` | If given, all output will be redirected to a file. If not given, the output is printed in the terminal. The active output file is automatically excluded from command processing. |
 | `-f`, `--format` | `-f "($0)"` | If given, formats each emitted output element. Use `$0` for the full emitted string and `$1`, `$2`, etc. for regex capture groups when the element comes from a regex match. |
 | `-a`, `--all` | `-a` | Includes hidden directories and files in the search. |
 | `-v`, `--verbose` | `-v` | Outputs additional information for some commands. |
@@ -67,3 +67,5 @@ It is recommended to use `-a` with `size` to ensure you get the proper sizes of 
 | `--nocolor` | `--nocolor` | Removes the ANSI color codes from the printed output. Log file outputs (when using -o) never have ANSI codes. |
 
 When `-f` is omitted, commands keep their current output format.
+
+PowerShell note: `"$0"` may be expanded by the shell before reaching FileBuddy. `--format` now defaults to `$0` when no value is provided, and you can also pass a literal using single quotes, for example `--format '$0'`.

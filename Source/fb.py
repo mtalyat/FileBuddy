@@ -373,7 +373,7 @@ def main(args):
     parser.add_argument('-d', '--directory', type=str, default='.', help='Directory to operate in (default: current directory)')
     parser.add_argument('-r', '--recursive', action='store_true', help='Search recursively in subdirectories')
     parser.add_argument('-o', '--output', type=str, help='Output file to write results to')
-    parser.add_argument('-f', '--format', type=str, help='Format each emitted output element using $0 for the full string and $1+ for regex groups when available')
+    parser.add_argument('-f', '--format', type=str, nargs='?', const='$0', help='Format each emitted output element using $0 for the full string and $1+ for regex groups when available. If no value is provided, defaults to $0.')
     parser.add_argument('-a', '--all', action='store_true', help='Include hidden files in the search')
     parser.add_argument('-y', '--yes', action='store_true', help='Automatically confirm prompts (e.g., for deletion)')
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
@@ -430,8 +430,10 @@ def main(args):
     outputFormat = getattr(args, 'format', None)
     # get output file, if any
     output_file = getattr(args, 'output', None)
+    output_file_path = None
     if output_file is not None:
         try:
+            output_file_path = fix_path(os.path.abspath(output_file))
             output_file = open(output_file, 'w')
         except Exception as e:
             print(f"Could not open output file '{output_file}': {e}")
@@ -457,6 +459,11 @@ def main(args):
     def print_safe(message: str):
         spinner.clear()
         print(message)
+
+    def is_output_file(path: str) -> bool:
+        if output_file_path is None:
+            return False
+        return fix_path(os.path.abspath(path)) == output_file_path
 
     def print_output(formatted_string: str, match = '', color=MATCH_COLOR, wrapColor = RESET_COLOR, raw_value: str | None = None, match_obj = None, apply_format: bool = True):
         nonlocal noColors, outputFormat
@@ -638,6 +645,8 @@ def main(args):
                     continue
 
                 full_path = f'{root}/{file}'
+                if is_output_file(full_path):
+                    continue
 
                 # if name pattern, and file does not match, skip it
                 printedFileName = False
@@ -657,6 +666,11 @@ def main(args):
                 if contentPattern:
                     contents = read_file(full_path)
                     for match_obj in contentRegex.finditer(contents):
+                        start, end = match_obj.span()
+                        # Skip zero-length matches (e.g., from patterns like ".*") to avoid duplicate-looking output.
+                        if start == end:
+                            continue
+
                         if not printedFileName:
                             # print the file name
                             print_output(f'{full_path}{{}}', raw_value=full_path, apply_format=False)
@@ -669,7 +683,6 @@ def main(args):
                             continue
 
                         # Show the first line where the match starts.
-                        start, end = match_obj.span()
                         line_number = get_line_number(contents, start)
 
                         line_start = contents.rfind('\n', 0, start) + 1
@@ -839,6 +852,8 @@ def main(args):
                     continue
         
                 full_path = f'{root}/{file}'
+                if is_output_file(full_path):
+                    continue
         
                 try:
                     contents = read_file(full_path)
@@ -962,6 +977,8 @@ def main(args):
                     continue
 
                 full_path = f'{root}/{file}'
+                if is_output_file(full_path):
+                    continue
 
                 # if name pattern, and file does not match, skip it
                 if namePattern and not re.search(namePattern, file):
@@ -1083,6 +1100,8 @@ def main(args):
                     continue
 
                 full_path = f'{root}/{file}'
+                if is_output_file(full_path):
+                    continue
 
                 # if name pattern, and file does not match, skip it
                 if pattern:
@@ -1135,6 +1154,8 @@ def main(args):
 
                 # get the file size and add it to the results
                 full_path = f'{root}/{file}'
+                if is_output_file(full_path):
+                    continue
                 try:
                     size = os.path.getsize(full_path)
                     rootSize += size
@@ -1180,6 +1201,8 @@ def main(args):
                     continue
 
                 full_path = f'{root}/{file}'
+                if is_output_file(full_path):
+                    continue
 
                 # if name pattern, and file does not match, skip it
                 match_obj = re.search(pattern, file) if pattern else None
@@ -1240,6 +1263,9 @@ def main(args):
             for dir in dirs:
                 _rename(dir, new_name, renameDirsAction)
             for file in files:
+                full_path = f'{root}/{file}'
+                if is_output_file(full_path):
+                    continue
                 _rename(file, new_name, renameFilesAction)
 
             if not recursive:
@@ -1343,6 +1369,9 @@ def main(args):
             for dir in dirs:
                 _delete(dir, True)
             for file in files:
+                full_path = f'{root}/{file}'
+                if is_output_file(full_path):
+                    continue
                 _delete(file, False)
 
             if not recursive:
@@ -1385,6 +1414,8 @@ def main(args):
                         os.makedirs(target_root, exist_ok=True)
                     for file in files:
                         src_file = f'{root}/{file}'
+                        if is_output_file(src_file):
+                            continue
                         dst_file = f'{target_root}/{file}'
                         print_info(f'Copying sub-file: {src_file} => {dst_file}')
                         shutil.copy2(src_file, dst_file)
@@ -1431,6 +1462,9 @@ def main(args):
             for dir in dirs:
                 _move(dir, True, moveDirsAction)
             for file in files:
+                full_path = f'{root}/{file}'
+                if is_output_file(full_path):
+                    continue
                 _move(file, False, moveFilesAction)
 
             if not recursive:
@@ -1477,6 +1511,8 @@ def main(args):
                         os.makedirs(target_root, exist_ok=True)
                     for file in files:
                         src_file = f'{root}/{file}'
+                        if is_output_file(src_file):
+                            continue
                         dst_file = f'{target_root}/{file}'
                         print_info(f'Moving sub-file: {src_file} => {dst_file}')
                         shutil.move(src_file, dst_file)
@@ -1525,6 +1561,9 @@ def main(args):
             for dir in dirs:
                 _move(dir, True, moveDirsAction)
             for file in files:
+                full_path = f'{root}/{file}'
+                if is_output_file(full_path):
+                    continue
                 _move(file, False, moveFilesAction)
 
             if not recursive:
