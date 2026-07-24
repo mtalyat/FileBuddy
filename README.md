@@ -46,6 +46,10 @@ For replace, escaped characters in replacement text are decoded before applying 
 
 For search, extract, and replace, the `-p` pattern filters file names before reading file contents.
 
+Read-only commands (`search`, `extract`, `list`, and `size`) automatically use internal parallel workers to improve performance while keeping output order stable.
+
+Large text files (100 MB and above) are read in chunks to avoid single huge read operations.
+
 For rename, copy, move, and delete, you can use the `-y` argument to skip the confirmation.
 
 It is recommended to use `-a` with `size` to ensure you get the proper sizes of directories. Otherwise, hidden sub-directories and files are ignored, which may yield invalid results.

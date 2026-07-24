@@ -24,9 +24,12 @@ def normalize_lines(path: str) -> list[str]:
         return [line.rstrip("\n") for line in f.readlines()]
 
 
-def run_fb(args: list[str], cwd: str) -> subprocess.CompletedProcess:
+def run_fb(args: list[str], cwd: str, env_overrides: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     cmd = [sys.executable, FB_PATH] + args
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+    env = os.environ.copy()
+    if env_overrides:
+        env.update(env_overrides)
+    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, env=env)
 
 
 def expect_equal(actual, expected):
@@ -229,6 +232,48 @@ def test_copy_move_delete(root: str):
     )
 
 
+def test_search_streaming_threshold_override(root: str):
+    large_path = os.path.join(root, "large.txt")
+    write_file(large_path, ("Alpha\n" * 2048) + "CrossChunkToken\n")
+
+    result = run_fb(
+        ["search", r"CrossChunkToken", "-p", r"\.txt$", "-d", ".", "-r", "-o", "out.txt"],
+        root,
+        env_overrides={
+            "FILEBUDDY_STREAMING_THRESHOLD_BYTES": "1024",
+            "FILEBUDDY_STREAM_CHUNK_SIZE": "64",
+            "FILEBUDDY_STREAM_REGEX_OVERLAP": "32",
+        },
+    )
+    ensure_success(result)
+    actual = normalize_lines(os.path.join(root, "out.txt"))
+    expect_true(
+        "./large.txt" in actual and any("CrossChunkToken" in line for line in actual),
+        "Search finds matches when chunked reading is forced",
+        "\n".join(actual),
+    )
+
+    boundary_file = os.path.join(root, "boundary.txt")
+    boundary_text = "C" * 50 + "A" * 30 + "XYZ" + "B" * 30 + "D" * 50
+    write_file(boundary_file, boundary_text)
+    result_boundary = run_fb(
+        ["search", r"A{30}XYZB{30}", "-p", r"^boundary\.txt$", "-d", ".", "-r", "-o", "boundary_out.txt"],
+        root,
+        env_overrides={
+            "FILEBUDDY_STREAMING_THRESHOLD_BYTES": "1",
+            "FILEBUDDY_STREAM_CHUNK_SIZE": "64",
+            "FILEBUDDY_STREAM_REGEX_OVERLAP": "128",
+        },
+    )
+    ensure_success(result_boundary)
+    boundary_lines = normalize_lines(os.path.join(root, "boundary_out.txt"))
+    expect_true(
+        "./boundary.txt" in boundary_lines and any("XYZ" in line for line in boundary_lines),
+        "Search finds regex matches that span chunk boundaries",
+        "\n".join(boundary_lines),
+    )
+
+
 def run_test_case(test_case: TestCase) -> bool:
     with tempfile.TemporaryDirectory(prefix="filebuddy_test_") as temp_dir:
         setup_fixture(temp_dir)
@@ -268,6 +313,7 @@ def main() -> int:
         TestCase("T008", "rename with $1 groups", test_rename_groups),
         TestCase("T009", "replace with $1 groups", test_replace_groups),
         TestCase("T010", "copy move delete flow", test_copy_move_delete),
+        TestCase("T011", "search with forced streaming read", test_search_streaming_threshold_override),
     ]
 
     passed = 0

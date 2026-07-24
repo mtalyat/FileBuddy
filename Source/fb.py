@@ -5,6 +5,7 @@ import re
 import time
 import threading
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 
 CMD_SEARCH = 'search'
 CMD_FIND = 'find'
@@ -32,6 +33,23 @@ EXT_PDF = '.pdf'
 EXT_WORD = '.docx'
 EXT_EXCEL = '.xlsx'
 EXT_POWERPOINT = '.pptx'
+
+def get_int_env(name: str, fallback: int) -> int:
+    """Reads a positive integer environment variable with fallback on invalid values."""
+    raw = os.getenv(name)
+    if raw is None:
+        return fallback
+    try:
+        value = int(raw)
+        return value if value > 0 else fallback
+    except ValueError:
+        return fallback
+
+STREAMING_THRESHOLD_BYTES = get_int_env('FILEBUDDY_STREAMING_THRESHOLD_BYTES', 100 * 1024 * 1024)
+STREAM_CHUNK_SIZE = get_int_env('FILEBUDDY_STREAM_CHUNK_SIZE', 1024 * 1024)
+STREAM_REGEX_OVERLAP = get_int_env('FILEBUDDY_STREAM_REGEX_OVERLAP', 64 * 1024)
+DEFAULT_MAX_WORKERS = get_int_env('FILEBUDDY_MAX_WORKERS', max(2, min(32, (os.cpu_count() or 4))))
+PARALLEL_COMMANDS = {CMD_SEARCH, CMD_EXTRACT, CMD_LIST, CMD_SIZE}
 EXT_IGNORE = {
     '.exe', 
     '.dll',
@@ -359,11 +377,77 @@ def read_file(path: str) -> str:
         elif extension in EXT_IGNORE:
             return ''
         else:
+            if should_stream_text_file(path):
+                return read_text_file_stream(path)
             with open(path, 'r', encoding='utf-8') as f:
                 return f.read()
     except Exception as e:
         print(f'Could not read file {path}: {e}')
         return ''
+
+def should_stream_text_file(path: str, threshold_bytes: int = STREAMING_THRESHOLD_BYTES) -> bool:
+    """Returns True when a text-like file is large enough to prefer chunked reads."""
+    extension = os.path.splitext(path)[1].lower()
+    if extension in EXT_IGNORE:
+        return False
+    if extension in {EXT_PDF, EXT_WORD, EXT_EXCEL, EXT_POWERPOINT}:
+        return False
+
+    try:
+        return os.path.getsize(path) >= threshold_bytes
+    except OSError:
+        return False
+
+def read_text_file_stream(path: str, chunk_size: int = STREAM_CHUNK_SIZE) -> str:
+    """Reads a large text file in chunks to avoid a single massive read call."""
+    chunks = []
+    with open(path, 'r', encoding='utf-8', errors='replace') as f:
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    return ''.join(chunks)
+
+def iter_stream_regex_matches(path: str, regex: re.Pattern, chunk_size: int = STREAM_CHUNK_SIZE, overlap_size: int = STREAM_REGEX_OVERLAP):
+    """Yields regex matches from a text file while reading it incrementally in chunks."""
+    overlap_size = max(1, overlap_size)
+    buffer = ''
+    buffer_start_line = 1
+
+    with open(path, 'r', encoding='utf-8', errors='replace') as f:
+        while True:
+            chunk = f.read(chunk_size)
+            eof = chunk == ''
+            if not eof:
+                buffer += chunk
+
+            scan_limit = len(buffer) if eof else max(0, len(buffer) - overlap_size)
+            if scan_limit > 0:
+                for match_obj in regex.finditer(buffer):
+                    if not eof and match_obj.end() > scan_limit:
+                        continue
+
+                    match_start = match_obj.start()
+                    match_end = match_obj.end()
+                    line_number = buffer_start_line + buffer.count('\n', 0, match_start)
+
+                    yield {
+                        'buffer': buffer,
+                        'line_number': line_number,
+                        'match_obj': match_obj,
+                        'match_start': match_start,
+                        'match_end': match_end,
+                    }
+
+            if eof:
+                break
+
+            trim_count = max(0, len(buffer) - overlap_size)
+            if trim_count > 0:
+                trimmed = buffer[:trim_count]
+                buffer_start_line += trimmed.count('\n')
+                buffer = buffer[trim_count:]
 
 def main(args):
     parser = argparse.ArgumentParser('FileBuddy', f'fb [{"|".join(COMMANDS)}] [options] [flags]')
@@ -396,6 +480,8 @@ def main(args):
     if command not in COMMANDS:
         print(f"Unknown command: {command}. Use -h for help.")
         return 1
+
+    enable_parallel = command in PARALLEL_COMMANDS
     
     options = getattr(args, 'options', [])
     optionsCount = len(options)
@@ -525,6 +611,44 @@ def main(args):
         else:
             # format the message with color
             print_safe(f'{ERROR_COLOR}{message}{RESET_COLOR}')
+
+    def prefetch_contents_ordered(paths: list[str]) -> dict[str, str]:
+        """Reads file contents and preserves the caller's path order for output stability."""
+        if len(paths) == 0:
+            return {}
+
+        if not enable_parallel or len(paths) == 1:
+            return {path: read_file(path) for path in paths}
+
+        with ThreadPoolExecutor(max_workers=min(DEFAULT_MAX_WORKERS, len(paths))) as executor:
+            contents = list(executor.map(read_file, paths))
+        return {path: contents[idx] for idx, path in enumerate(paths)}
+
+    def collect_file_sizes(paths: list[str]) -> dict[str, int]:
+        """Gets file sizes, optionally in parallel, while keeping deterministic mapping."""
+        if len(paths) == 0:
+            return {}
+
+        def get_size(path: str) -> tuple[str, int | None, str | None]:
+            try:
+                return path, os.path.getsize(path), None
+            except Exception as e:
+                return path, None, str(e)
+
+        if not enable_parallel or len(paths) == 1:
+            results = [get_size(path) for path in paths]
+        else:
+            with ThreadPoolExecutor(max_workers=min(DEFAULT_MAX_WORKERS, len(paths))) as executor:
+                results = list(executor.map(get_size, paths))
+
+        size_map: dict[str, int] = {}
+        for path, size, error in results:
+            if error is not None:
+                print_error(f'Could not get size of file {path}: {error}')
+                continue
+            if size is not None:
+                size_map[path] = size
+        return size_map
     
     def print_info(message):
         nonlocal verbose, noColors
@@ -638,33 +762,127 @@ def main(args):
                         before, match_text, after = split_match(match_obj)
                         print_output(f'{root}/{before}{{}}{after}/', match_text, raw_value=raw_value, match_obj=match_obj, apply_format=False)
 
-            # search file names and contents if patterns are specified
+            eligible_files: list[tuple[str, str]] = []
             for file in files:
-                # ignore hidden files if hidden flag is not set
                 if not hidden and file.startswith('.'):
                     continue
-
                 full_path = f'{root}/{file}'
                 if is_output_file(full_path):
                     continue
 
-                # if name pattern, and file does not match, skip it
+                if namePattern and not re.search(namePattern, file):
+                    continue
+                eligible_files.append((file, full_path))
+
+            stream_mode_by_path = {
+                full_path: should_stream_text_file(full_path)
+                for _, full_path in eligible_files
+            }
+            prefetch_paths = [
+                full_path
+                for _, full_path in eligible_files
+                if contentPattern and not stream_mode_by_path.get(full_path, False)
+            ]
+            contents_by_path = prefetch_contents_ordered(prefetch_paths) if contentPattern else {}
+
+            # search file names and contents if patterns are specified
+            for file, full_path in eligible_files:
                 printedFileName = False
+
                 if namePattern:
                     match_obj = re.search(namePattern, file)
-                    if not match_obj:
-                        continue
-                    # add to results
-                    results_names.append(full_path)
-                    # print the file name with match highlighted
-                    before, match_text, after = split_match(match_obj)
-                    print_output(f'{root}/{before}{{}}{after}', match_text, raw_value=full_path, match_obj=match_obj, apply_format=False)
-                    printedFileName = True
+                    if match_obj:
+                        results_names.append(full_path)
+                        before, match_text, after = split_match(match_obj)
+                        print_output(f'{root}/{before}{{}}{after}', match_text, raw_value=full_path, match_obj=match_obj, apply_format=False)
+                        printedFileName = True
 
-                # if contents pattern, and file does not match, skip it
                 hits = 0
                 if contentPattern:
-                    contents = read_file(full_path)
+                    if stream_mode_by_path.get(full_path, False):
+                        for stream_match in iter_stream_regex_matches(full_path, contentRegex):
+                            match_obj = stream_match['match_obj']
+                            start = stream_match['match_start']
+                            end = stream_match['match_end']
+                            if start == end:
+                                continue
+
+                            if not printedFileName:
+                                print_output(f'{full_path}{{}}', raw_value=full_path, apply_format=False)
+                                printedFileName = True
+
+                            hits += 1
+
+                            if outputFormat is not None:
+                                print_output('{}', match_obj.group(0), wrapColor=INFO_COLOR, raw_value=match_obj.group(0), match_obj=match_obj)
+                                continue
+
+                            buffer = stream_match['buffer']
+                            line_number = stream_match['line_number']
+                            line_start = buffer.rfind('\n', 0, start) + 1
+                            end_line_number = line_number + match_obj.group(0).count('\n')
+
+                            if end_line_number > line_number:
+                                line_starts = [line_start]
+                                cursor = line_start
+                                expected_lines = end_line_number - line_number + 1
+
+                                while len(line_starts) < expected_lines:
+                                    next_break = buffer.find('\n', cursor)
+                                    if next_break == -1:
+                                        break
+                                    cursor = next_break + 1
+                                    line_starts.append(cursor)
+
+                                def print_line_preview(preview_line_number: int, preview_line_start: int):
+                                    preview_line_end = buffer.find('\n', preview_line_start)
+                                    if preview_line_end == -1:
+                                        preview_line_end = len(buffer)
+
+                                    line_text = buffer[preview_line_start:preview_line_end]
+                                    start_in_line = max(0, start - preview_line_start)
+                                    end_in_line = min(preview_line_end, end) - preview_line_start
+                                    end_in_line = max(start_in_line, end_in_line)
+
+                                    before = line_text[:start_in_line]
+                                    match_text = line_text[start_in_line:end_in_line]
+                                    after = line_text[end_in_line:]
+
+                                    if match_text:
+                                        raw_value = f'    {preview_line_number}: {line_text}'
+                                        print_output(f'    {preview_line_number}: {before}{{}}{after}', match_text, wrapColor=INFO_COLOR, raw_value=raw_value, match_obj=match_obj)
+                                    else:
+                                        raw_value = f'    {preview_line_number}: {line_text}'
+                                        print_output(f'    {preview_line_number}: {line_text}', wrapColor=INFO_COLOR, raw_value=raw_value, match_obj=match_obj)
+
+                                if len(line_starts) <= 2:
+                                    for line_offset, preview_line_start in enumerate(line_starts):
+                                        print_line_preview(line_number + line_offset, preview_line_start)
+                                else:
+                                    print_line_preview(line_number, line_starts[0])
+                                    print_output('    ...', wrapColor=INFO_COLOR, raw_value='    ...', match_obj=match_obj)
+                                    print_line_preview(end_line_number, line_starts[-1])
+                                continue
+
+                            line_end = buffer.find('\n', line_start)
+                            if line_end == -1:
+                                line_end = len(buffer)
+
+                            line_text = buffer[line_start:line_end]
+                            start_in_line = start - line_start
+                            end_in_line = max(start_in_line, min(end, line_end) - line_start)
+
+                            before = line_text[:start_in_line]
+                            match_text = line_text[start_in_line:end_in_line]
+                            after = line_text[end_in_line:]
+
+                            if not match_text:
+                                match_text = match_obj.group(0).split('\n', 1)[0]
+
+                            raw_value = f'    {line_number}: {line_text}'
+                            print_output(f'    {line_number}: {before}{{}}{after}', match_text, wrapColor=INFO_COLOR, raw_value=raw_value, match_obj=match_obj)
+
+                    contents = contents_by_path.get(full_path, '')
                     for match_obj in contentRegex.finditer(contents):
                         start, end = match_obj.span()
                         # Skip zero-length matches (e.g., from patterns like ".*") to avoid duplicate-looking output.
@@ -672,7 +890,6 @@ def main(args):
                             continue
 
                         if not printedFileName:
-                            # print the file name
                             print_output(f'{full_path}{{}}', raw_value=full_path, apply_format=False)
                             printedFileName = True
 
@@ -682,14 +899,11 @@ def main(args):
                             print_output('{}', match_obj.group(0), wrapColor=INFO_COLOR, raw_value=match_obj.group(0), match_obj=match_obj)
                             continue
 
-                        # Show the first line where the match starts.
                         line_number = get_line_number(contents, start)
 
                         line_start = contents.rfind('\n', 0, start) + 1
                         end_line_number = get_line_number(contents, max(start, end - 1))
 
-                        # For multiline matches, print each visible line inline with its line
-                        # number and highlight only the matched segment on that line.
                         if end_line_number > line_number:
                             line_starts = [line_start]
                             cursor = line_start
@@ -744,15 +958,13 @@ def main(args):
                         match_text = line_text[start_in_line:end_in_line]
                         after = line_text[end_in_line:]
 
-                        # If match starts exactly at a line break edge, fallback to raw match text preview.
                         if not match_text:
                             match_text = match_obj.group(0).split('\n', 1)[0]
 
                         raw_value = f'    {line_number}: {line_text}'
                         print_output(f'    {line_number}: {before}{{}}{after}', match_text, wrapColor=INFO_COLOR, raw_value=raw_value, match_obj=match_obj)
-                
+
                 if printedFileName:
-                    # add to results
                     results_contents[full_path] = hits
             if not recursive:
                 break
@@ -971,8 +1183,8 @@ def main(args):
             results_count += 1
             print_info(f'Searching "{root}"')
 
+            eligible_files: list[tuple[str, str]] = []
             for file in files:
-                # ignore hidden files if hidden flag is not set
                 if not hidden and file.startswith('.'):
                     continue
 
@@ -980,15 +1192,33 @@ def main(args):
                 if is_output_file(full_path):
                     continue
 
-                # if name pattern, and file does not match, skip it
                 if namePattern and not re.search(namePattern, file):
                     continue
 
-                contents = read_file(full_path)
+                eligible_files.append((file, full_path))
+
+            stream_mode_by_path = {
+                full_path: should_stream_text_file(full_path)
+                for _, full_path in eligible_files
+            }
+            prefetch_paths = [
+                full_path
+                for _, full_path in eligible_files
+                if not stream_mode_by_path.get(full_path, False)
+            ]
+            contents_by_path = prefetch_contents_ordered(prefetch_paths)
+
+            for _, full_path in eligible_files:
                 file_extracts = 0
                 printedFileName = False
 
-                for match_index, match_obj in enumerate(contentRegex.finditer(contents), start=1):
+                if stream_mode_by_path.get(full_path, False):
+                    match_iter = (item['match_obj'] for item in iter_stream_regex_matches(full_path, contentRegex))
+                else:
+                    contents = contents_by_path.get(full_path, '')
+                    match_iter = contentRegex.finditer(contents)
+
+                for match_index, match_obj in enumerate(match_iter, start=1):
                     groups = match_obj.groups()
                     if not groups:
                         continue
@@ -1058,6 +1288,20 @@ def main(args):
             print(f'{CMD_LIST} usage: fb {CMD_LIST} [flags]')
             return 1
 
+        def filter_pattern_names(names: list[str]) -> list[str]:
+            if pattern is None:
+                return names
+
+            def is_match(name: str) -> bool:
+                return re.search(pattern, name) is not None
+
+            if not enable_parallel or len(names) <= 1:
+                return [name for name in names if is_match(name)]
+
+            with ThreadPoolExecutor(max_workers=min(DEFAULT_MAX_WORKERS, len(names))) as executor:
+                flags = list(executor.map(is_match, names))
+            return [name for name, matched in zip(names, flags) if matched]
+
         # search all files and directories by walking through them
         results_file_count = 0
         results_directory_count = 0
@@ -1069,52 +1313,35 @@ def main(args):
             if not hidden and '/.' in root:
                 continue
 
-            # search directory names if namePattern is specified
+            visible_dirs = [dir for dir in dirs if hidden or not dir.startswith('.')]
             if pattern:
-                for dir in dirs:
-                    # ignore hidden directories if hidden flag is not set
-                    if not hidden and dir.startswith('.'):
-                        continue
-
-                    # search the name
-                    match_obj = re.search(pattern, dir)
-                    if match_obj:
-                        raw_value = f'{root}/{dir}/'
-                        print_output(raw_value, raw_value=raw_value, match_obj=match_obj)
+                for dir in filter_pattern_names(visible_dirs):
+                    raw_value = f'{root}/{dir}/'
+                    print_output(raw_value, raw_value=raw_value)
+                    results_directory_count += 1
             else:
-                # list all directories
-                for dir in dirs:
-                    # ignore hidden directories if hidden flag is not set
-                    if not hidden and dir.startswith('.'):
-                        continue
-
-                    # print the directory name
+                for dir in visible_dirs:
                     raw_value = f'{root}/{dir}/'
                     print_output(raw_value, raw_value=raw_value)
                     results_directory_count += 1
 
-            # search file names and contents if patterns are specified
+            visible_files = []
             for file in files:
-                # ignore hidden files if hidden flag is not set
                 if not hidden and file.startswith('.'):
                     continue
-
                 full_path = f'{root}/{file}'
                 if is_output_file(full_path):
                     continue
+                visible_files.append(file)
 
-                # if name pattern, and file does not match, skip it
-                if pattern:
-                    match_obj = re.search(pattern, file)
-                    if not match_obj:
-                        continue
-                    
-                    print_output(f'{root}/{file}', raw_value=full_path, match_obj=match_obj)
+            if pattern:
+                for file in filter_pattern_names(visible_files):
+                    full_path = f'{root}/{file}'
+                    print_output(f'{root}/{file}', raw_value=full_path)
                     results_file_count += 1
-                else: 
-                    # list all files
-
-                    # print the file name
+            else:
+                for file in visible_files:
+                    full_path = f'{root}/{file}'
                     print_output(f'{root}/{file}', raw_value=full_path)
                     results_file_count += 1
             if not recursive:
@@ -1147,23 +1374,21 @@ def main(args):
                 full_path = f'{root}/{dir}'
                 rootSize += results_sizes.get(full_path, 0)
 
+            file_paths = []
             for file in files:
-                # ignore hidden files if hidden flag is not set
                 if not hidden and file.startswith('.'):
                     continue
 
-                # get the file size and add it to the results
                 full_path = f'{root}/{file}'
                 if is_output_file(full_path):
                     continue
-                try:
-                    size = os.path.getsize(full_path)
-                    rootSize += size
-                    results_sizes[full_path] = size
-                    print_info(f'"{full_path}" => {get_byte_string(rootSize)}')
-                except Exception as e:
-                    print_error(f'Could not get size of file {full_path}: {e}')
-                    continue
+                file_paths.append(full_path)
+
+            file_sizes = collect_file_sizes(file_paths)
+            for full_path, size in file_sizes.items():
+                rootSize += size
+                results_sizes[full_path] = size
+                print_info(f'"{full_path}" => {get_byte_string(rootSize)}')
 
             # add the root directory size to the results
             results_sizes[root] = rootSize
