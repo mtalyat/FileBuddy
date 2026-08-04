@@ -327,6 +327,30 @@ def print_summary(title: str, results: dict):
         print(line)
     print("+" + "-" * content_width + "+")
 
+def detect_text_encoding(path: str) -> str:
+    """Best-effort text encoding detection for UTF-8 and UTF-16 variants."""
+    try:
+        with open(path, 'rb') as f:
+            header = f.read(4096)
+    except OSError:
+        return 'utf-8'
+
+    if header.startswith(b'\xff\xfe') or header.startswith(b'\xfe\xff'):
+        return 'utf-16'
+
+    # Heuristic for UTF-16 text without BOM: frequent NUL bytes in alternating positions.
+    if len(header) >= 4:
+        even_nuls = sum(1 for i in range(0, len(header), 2) if header[i] == 0)
+        odd_nuls = sum(1 for i in range(1, len(header), 2) if header[i] == 0)
+        pairs = len(header) // 2
+        if pairs > 0:
+            if odd_nuls / pairs > 0.3 and even_nuls / pairs < 0.1:
+                return 'utf-16-le'
+            if even_nuls / pairs > 0.3 and odd_nuls / pairs < 0.1:
+                return 'utf-16-be'
+
+    return 'utf-8'
+
 def read_file(path: str) -> str:
     """Reads the contents of a file and returns it as a string."""
     # For certain files, use custom readers to avoid issues (e.g., permission errors, binary files, pdfs, etc.)
@@ -377,9 +401,10 @@ def read_file(path: str) -> str:
         elif extension in EXT_IGNORE:
             return ''
         else:
+            encoding = detect_text_encoding(path)
             if should_stream_text_file(path):
-                return read_text_file_stream(path)
-            with open(path, 'r', encoding='utf-8') as f:
+                return read_text_file_stream(path, encoding=encoding)
+            with open(path, 'r', encoding=encoding, errors='replace') as f:
                 return f.read()
     except Exception as e:
         print(f'Could not read file {path}: {e}')
@@ -398,10 +423,12 @@ def should_stream_text_file(path: str, threshold_bytes: int = STREAMING_THRESHOL
     except OSError:
         return False
 
-def read_text_file_stream(path: str, chunk_size: int = STREAM_CHUNK_SIZE) -> str:
+def read_text_file_stream(path: str, chunk_size: int = STREAM_CHUNK_SIZE, encoding: str | None = None) -> str:
     """Reads a large text file in chunks to avoid a single massive read call."""
+    if encoding is None:
+        encoding = detect_text_encoding(path)
     chunks = []
-    with open(path, 'r', encoding='utf-8', errors='replace') as f:
+    with open(path, 'r', encoding=encoding, errors='replace') as f:
         while True:
             chunk = f.read(chunk_size)
             if not chunk:
@@ -414,8 +441,9 @@ def iter_stream_regex_matches(path: str, regex: re.Pattern, chunk_size: int = ST
     overlap_size = max(1, overlap_size)
     buffer = ''
     buffer_start_line = 1
+    encoding = detect_text_encoding(path)
 
-    with open(path, 'r', encoding='utf-8', errors='replace') as f:
+    with open(path, 'r', encoding=encoding, errors='replace') as f:
         while True:
             chunk = f.read(chunk_size)
             eof = chunk == ''
