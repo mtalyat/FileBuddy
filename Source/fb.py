@@ -1251,6 +1251,16 @@ def main(args):
                     if not groups:
                         continue
 
+                    if outputFormat is not None:
+                        if not printedFileName:
+                            print_output(f'{full_path}', raw_value=full_path, match_obj=match_obj, apply_format=False)
+                            printedFileName = True
+
+                        match_text = match_obj.group(0)
+                        print_output('{}', match_text, wrapColor=INFO_COLOR, raw_value=match_text, match_obj=match_obj)
+                        file_extracts += 1
+                        continue
+
                     for group_index, group in enumerate(groups, start=1):
                         if group is None:
                             continue
@@ -1260,11 +1270,6 @@ def main(args):
                             printedFileName = True
 
                         group_text = str(group).replace('\r\n', '\n').replace('\r', '\n')
-
-                        if outputFormat is not None:
-                            print_output('{}', group_text, wrapColor=INFO_COLOR, raw_value=group_text, match_obj=match_obj)
-                            file_extracts += 1
-                            continue
 
                         group_lines = group_text.split('\n')
                         if group_lines and group_lines[-1] == '':

@@ -124,6 +124,31 @@ def test_extract_groups(root: str):
     expect_equal(actual, expected)
 
 
+def test_extract_format_single_output_per_match(root: str):
+    result = run_fb([
+        "extract",
+        r"(\w+)\s+(\w+)!",
+        "-p",
+        r"\.txt$",
+        "-d",
+        ".",
+        "-r",
+        "--format",
+        "$1, $2",
+        "-o",
+        "out.txt",
+    ], root)
+    ensure_success(result)
+    actual = normalize_lines(os.path.join(root, "out.txt"))
+    expected = [
+        "./test.txt",
+        "Hello, world",
+        "Hello, cow",
+        "Bye, pig",
+    ]
+    expect_equal(actual, expected)
+
+
 def test_search_format_content_only(root: str):
     result = run_fb([
         "search",
@@ -307,6 +332,7 @@ def main() -> int:
         TestCase("T002", "search with -p filter", test_search_file_filter),
         TestCase("T003", "find alias equals search", test_find_alias),
         TestCase("T004", "extract capture groups", test_extract_groups),
+        TestCase("T004b", "extract format emits one line per match", test_extract_format_single_output_per_match),
         TestCase("T005", "search format applies to content", test_search_format_content_only),
         TestCase("T006", "list format applies to paths", test_list_format_paths),
         TestCase("T007", "-o output file excluded", test_output_file_excluded),
