@@ -21,6 +21,17 @@ COMMANDS = [CMD_SEARCH, CMD_FIND, CMD_EXTRACT, CMD_REPLACE, CMD_LIST, CMD_SIZE, 
 COMMAND_ALIASES = {
     CMD_FIND: CMD_SEARCH,
 }
+COMMAND_USAGE_ARGS = {
+    CMD_SEARCH: '<content_pattern> [flags]',
+    CMD_REPLACE: '<search_pattern> <replacement> [flags]',
+    CMD_EXTRACT: '<content_pattern> [flags]',
+    CMD_LIST: '[flags]',
+    CMD_SIZE: '[flags]',
+    CMD_RENAME: '<new_name> [flags]',
+    CMD_DELETE: '[flags]',
+    CMD_COPY: '<output_dir|output_file> [flags]',
+    CMD_MOVE: '<output_dir|output_file> [flags]',
+}
 
 MATCH_COLOR = '\033[33m' # Yellow
 FILE_COLOR = '\033[36m' # Cyan
@@ -44,6 +55,15 @@ def get_int_env(name: str, fallback: int) -> int:
         return value if value > 0 else fallback
     except ValueError:
         return fallback
+
+def print_command_usage(command: str) -> bool:
+    canonical = COMMAND_ALIASES.get(command, command)
+    usage_args = COMMAND_USAGE_ARGS.get(canonical)
+    if usage_args is None:
+        return False
+
+    print(f'{canonical} usage: fb {canonical} {usage_args}')
+    return True
 
 STREAMING_THRESHOLD_BYTES = get_int_env('FILEBUDDY_STREAMING_THRESHOLD_BYTES', 100 * 1024 * 1024)
 STREAM_CHUNK_SIZE = get_int_env('FILEBUDDY_STREAM_CHUNK_SIZE', 1024 * 1024)
@@ -478,9 +498,10 @@ def iter_stream_regex_matches(path: str, regex: re.Pattern, chunk_size: int = ST
                 buffer = buffer[trim_count:]
 
 def main(args):
-    parser = argparse.ArgumentParser('FileBuddy', f'fb [{"|".join(COMMANDS)}] [options] [flags]')
-    parser.add_argument('command', choices=COMMANDS, help='Command to execute')
+    parser = argparse.ArgumentParser('FileBuddy', f'fb [{"|".join(COMMANDS)}] [options] [flags]', add_help=False)
+    parser.add_argument('command', nargs='?', choices=COMMANDS, help='Command to execute')
     parser.add_argument('options', nargs='*', help='Options for the command')
+    parser.add_argument('-h', '--help', action='store_true', help='Show help for all commands or for a specific command')
     parser.add_argument('-p', '--pattern', type=str, help='File pattern to search for')
     parser.add_argument('-d', '--directory', type=str, default='.', help='Directory to operate in (default: current directory)')
     parser.add_argument('-r', '--recursive', action='store_true', help='Search recursively in subdirectories')
@@ -499,6 +520,16 @@ def main(args):
     args = parser.parse_args(args[1:]) # Skip the file path
 
     command = getattr(args, 'command', None)
+    show_help = getattr(args, 'help', False)
+    if show_help:
+        if command is None:
+            parser.print_help()
+        else:
+            command = COMMAND_ALIASES.get(command, command)
+            if not print_command_usage(command):
+                parser.print_help()
+        return 0
+
     if command is None:
         print("No command specified. Use -h for help.")
         return 1
@@ -743,7 +774,7 @@ def main(args):
     if command == CMD_SEARCH:
         # contents pattern given in the options
         if optionsCount != 1:
-            print(f'{CMD_SEARCH} usage: fb {CMD_SEARCH} <content_pattern> [flags]')
+            print_command_usage(CMD_SEARCH)
             return 1
 
         # get search parameters, if any
@@ -1004,7 +1035,7 @@ def main(args):
     elif command == CMD_REPLACE:
         # check options
         if optionsCount != 2:
-            print(f'{CMD_REPLACE} usage: fb {CMD_REPLACE} <search_pattern> <replacement> [flags]')
+            print_command_usage(CMD_REPLACE)
             return 1
         
         searchPattern = options[0]
@@ -1183,7 +1214,7 @@ def main(args):
     elif command == CMD_EXTRACT:
         # contents pattern given in the options
         if optionsCount != 1:
-            print(f'{CMD_EXTRACT} usage: fb {CMD_EXTRACT} <content_pattern> [flags]')
+            print_command_usage(CMD_EXTRACT)
             return 1
 
         # get extract parameters, if any
@@ -1318,7 +1349,7 @@ def main(args):
     elif command == CMD_LIST:
         # contents pattern given in the options
         if optionsCount > 0:
-            print(f'{CMD_LIST} usage: fb {CMD_LIST} [flags]')
+            print_command_usage(CMD_LIST)
             return 1
 
         def filter_pattern_names(names: list[str]) -> list[str]:
@@ -1383,7 +1414,7 @@ def main(args):
     elif command == CMD_SIZE:
         # contents pattern given in the options
         if optionsCount > 0:
-            print(f'{CMD_SIZE} usage: fb {CMD_SIZE} [flags]')
+            print_command_usage(CMD_SIZE)
             return 1
 
         # search all files and directories by walking through them
@@ -1478,7 +1509,7 @@ def main(args):
     elif command == CMD_RENAME:
         # check options
         if optionsCount != 1:
-            print(f'{CMD_RENAME} usage: fb {CMD_RENAME} <new_name> [flags]')
+            print_command_usage(CMD_RENAME)
             return 1
 
         new_name = options[0]
@@ -1541,7 +1572,7 @@ def main(args):
     elif command == CMD_DELETE:
         # check options
         if optionsCount > 0:
-            print(f'{CMD_DELETE} usage: fb {CMD_DELETE} [flags]')
+            print_command_usage(CMD_DELETE)
             return 1
 
         def delete_file(path: str) -> bool:
@@ -1643,7 +1674,7 @@ def main(args):
     elif command == CMD_COPY:
         # check options
         if optionsCount != 1:
-            print(f'{CMD_COPY} usage: fb {CMD_COPY} <output_dir|output_file> [flags]')
+            print_command_usage(CMD_COPY)
             return 1
 
         output_path = options[0]
@@ -1740,7 +1771,7 @@ def main(args):
     elif command == CMD_MOVE:
         # check options
         if optionsCount != 1:
-            print(f'{CMD_MOVE} usage: fb {CMD_MOVE} <output_dir|output_file> [flags]')
+            print_command_usage(CMD_MOVE)
             return 1
 
         output_path = options[0]
