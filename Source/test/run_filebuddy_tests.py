@@ -2,6 +2,7 @@ import os
 import sys
 import subprocess
 import tempfile
+from datetime import datetime, timedelta
 from dataclasses import dataclass
 
 GREEN = "\033[32m"
@@ -298,6 +299,43 @@ def test_search_streaming_threshold_override(root: str):
         "\n".join(boundary_lines),
     )
 
+def test_date_filters(root: str):
+    old_path = os.path.join(root, "old.txt")
+    middle_path = os.path.join(root, "middle.txt")
+    today_path = os.path.join(root, "today.txt")
+
+    write_file(old_path, "old\n")
+    write_file(middle_path, "middle\n")
+    write_file(today_path, "today\n")
+
+    now = datetime.now()
+    old_time = now - timedelta(days=3)
+    middle_time = now - timedelta(days=1)
+    today_time = now - timedelta(hours=1)
+
+    os.utime(old_path, (old_time.timestamp(), old_time.timestamp()))
+    os.utime(middle_path, (middle_time.timestamp(), middle_time.timestamp()))
+    os.utime(today_path, (today_time.timestamp(), today_time.timestamp()))
+
+    pattern = r"^(old|middle|today)\.txt$"
+
+    before_cutoff = (now - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
+    result_before = run_fb(["list", "-d", ".", "-r", "-p", pattern, "--before", before_cutoff, "-o", "before.txt"], root)
+    ensure_success(result_before)
+    before_lines = normalize_lines(os.path.join(root, "before.txt"))
+    expect_equal(before_lines, ["./old.txt"])
+
+    after_cutoff = (now - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
+    result_after = run_fb(["list", "-d", ".", "-r", "-p", pattern, "--after", after_cutoff, "-o", "after.txt"], root)
+    ensure_success(result_after)
+    after_lines = set(normalize_lines(os.path.join(root, "after.txt")))
+    expect_equal(after_lines, {"./middle.txt", "./today.txt"})
+
+    result_today = run_fb(["list", "-d", ".", "-r", "-p", pattern, "--today", "-o", "today-filter.txt"], root)
+    ensure_success(result_today)
+    today_lines = normalize_lines(os.path.join(root, "today-filter.txt"))
+    expect_equal(today_lines, ["./today.txt"])
+
 
 def run_test_case(test_case: TestCase) -> bool:
     with tempfile.TemporaryDirectory(prefix="filebuddy_test_") as temp_dir:
@@ -340,6 +378,7 @@ def main() -> int:
         TestCase("T009", "replace with $1 groups", test_replace_groups),
         TestCase("T010", "copy move delete flow", test_copy_move_delete),
         TestCase("T011", "search with forced streaming read", test_search_streaming_threshold_override),
+        TestCase("T012", "before/after/today date filters", test_date_filters),
     ]
 
     passed = 0

@@ -69,7 +69,12 @@ It is recommended to use `-a` with `size` to ensure you get the proper sizes of 
 | `-y`, `--yes` | `-y` | Automatically confirms all confirmation prompts. |
 | `-s`, `--summary` | `-s` | Prints a summary result table after the operation has completed. |
 | `--nocolor` | `--nocolor` | Removes the ANSI color codes from the printed output. Log file outputs (when using -o) never have ANSI codes. |
+| `--before` | `--before "2026-10-16 14:30:00"` | Includes only files modified before the given local date/time. |
+| `--after` | `--after "2026-10-16 14:30:00"` | Includes only files modified after the given local date/time. |
+| `--today` | `--today` | Includes only files modified on the current local system date. |
 
 When `-f` is omitted, commands keep their current output format.
+
+Date/time filters use local system time. `--before` and `--after` accept ISO-like local date/time values (for example `YYYY-MM-DD HH:MM:SS` or `YYYY-MM-DDTHH:MM:SS`).
 
 PowerShell note: `"$0"` may be expanded by the shell before reaching FileBuddy. `--format` now defaults to `$0` when no value is provided, and you can also pass a literal using single quotes, for example `--format '$0'`.

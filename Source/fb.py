@@ -5,6 +5,7 @@ import re
 import time
 import threading
 import shutil
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
 CMD_SEARCH = 'search'
@@ -512,6 +513,9 @@ def main(args):
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
     parser.add_argument('-s', '--summary', action='store_true', help='Print a summary of results at the end')
     parser.add_argument('--nocolor', action='store_true', help='Disable color in the output.')
+    parser.add_argument('--before', type=str, help='Only include files modified before this local date/time (ISO-like format, e.g. "2026-10-16 14:30:00").')
+    parser.add_argument('--after', type=str, help='Only include files modified after this local date/time (ISO-like format, e.g. "2026-10-16 14:30:00").')
+    parser.add_argument('--today', action='store_true', help='Only include files modified today (local system date).')
 
     if(len(args) <= 1):
         parser.print_help()
@@ -573,6 +577,36 @@ def main(args):
     showSummary = getattr(args, 'summary', False)
     noColors = getattr(args, 'nocolor', False)
     outputFormat = getattr(args, 'format', None)
+    beforeValue = getattr(args, 'before', None)
+    afterValue = getattr(args, 'after', None)
+    todayOnly = getattr(args, 'today', False)
+
+    def parse_local_datetime(value: str, flag_name: str) -> datetime | None:
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            print(
+                f'Invalid value for {flag_name}: "{value}". '
+                f'Use a local date/time in ISO-like format, for example "2026-10-16 14:30:00".'
+            )
+            return None
+
+    modified_before: datetime | None = None
+    modified_after: datetime | None = None
+    if beforeValue is not None:
+        modified_before = parse_local_datetime(beforeValue, '--before')
+        if modified_before is None:
+            return 1
+    if afterValue is not None:
+        modified_after = parse_local_datetime(afterValue, '--after')
+        if modified_after is None:
+            return 1
+
+    if modified_before is not None and modified_after is not None and modified_after >= modified_before:
+        print(f'Invalid date range: --after ({afterValue}) must be earlier than --before ({beforeValue}).')
+        return 1
+
+    local_today = datetime.now().date()
     # get output file, if any
     output_file = getattr(args, 'output', None)
     output_file_path = None
@@ -609,6 +643,21 @@ def main(args):
         if output_file_path is None:
             return False
         return fix_path(os.path.abspath(path)) == output_file_path
+
+    def file_matches_modified_filters(path: str) -> bool:
+        try:
+            modified_at = datetime.fromtimestamp(os.path.getmtime(path))
+        except Exception as e:
+            print_error(f'Could not read modified time for "{path}": {e}')
+            return False
+
+        if modified_before is not None and not (modified_at < modified_before):
+            return False
+        if modified_after is not None and not (modified_at > modified_after):
+            return False
+        if todayOnly and modified_at.date() != local_today:
+            return False
+        return True
 
     def print_output(formatted_string: str, match = '', color=MATCH_COLOR, wrapColor = RESET_COLOR, raw_value: str | None = None, match_obj = None, apply_format: bool = True):
         nonlocal noColors, outputFormat
@@ -827,6 +876,8 @@ def main(args):
                     continue
                 full_path = f'{root}/{file}'
                 if is_output_file(full_path):
+                    continue
+                if not file_matches_modified_filters(full_path):
                     continue
 
                 if namePattern and not re.search(namePattern, file):
@@ -1125,7 +1176,9 @@ def main(args):
                 full_path = f'{root}/{file}'
                 if is_output_file(full_path):
                     continue
-        
+                if not file_matches_modified_filters(full_path):
+                    continue
+
                 try:
                     contents = read_file(full_path)
                 except Exception as e:
@@ -1249,6 +1302,8 @@ def main(args):
 
                 full_path = f'{root}/{file}'
                 if is_output_file(full_path):
+                    continue
+                if not file_matches_modified_filters(full_path):
                     continue
 
                 if namePattern and not re.search(namePattern, file):
@@ -1396,6 +1451,8 @@ def main(args):
                 full_path = f'{root}/{file}'
                 if is_output_file(full_path):
                     continue
+                if not file_matches_modified_filters(full_path):
+                    continue
                 visible_files.append(file)
 
             if pattern:
@@ -1446,6 +1503,8 @@ def main(args):
                 full_path = f'{root}/{file}'
                 if is_output_file(full_path):
                     continue
+                if not file_matches_modified_filters(full_path):
+                    continue
                 file_paths.append(full_path)
 
             file_sizes = collect_file_sizes(file_paths)
@@ -1491,6 +1550,8 @@ def main(args):
 
                 full_path = f'{root}/{file}'
                 if is_output_file(full_path):
+                    continue
+                if not file_matches_modified_filters(full_path):
                     continue
 
                 # if name pattern, and file does not match, skip it
@@ -1545,6 +1606,8 @@ def main(args):
                     return
 
                 old_path = f'{root}/{name}'
+                if action is renameFilesAction and not file_matches_modified_filters(old_path):
+                    return
                 new_path = f'{root}/{regex_sub(match_obj, new_name)}'
 
                 action.specific.append([old_path, new_path])
@@ -1645,6 +1708,8 @@ def main(args):
                     return False
                 
                 full_path = f'{root}/{name}'
+                if not directory and not file_matches_modified_filters(full_path):
+                    return False
 
                 if directory:
                     # remove the directory
@@ -1735,6 +1800,8 @@ def main(args):
                     return False
 
                 from_path = f'{root}/{name}'
+                if not is_dir and not file_matches_modified_filters(from_path):
+                    return False
                 destination = output_path
                 if not is_dir and destination.endswith('/'):
                     destination += name
@@ -1834,6 +1901,8 @@ def main(args):
                     return False
 
                 from_path = f'{root}/{name}'
+                if not is_dir and not file_matches_modified_filters(from_path):
+                    return False
                 destination = output_path
                 if not is_dir and destination.endswith('/'):
                     destination += name
