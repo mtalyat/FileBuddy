@@ -72,6 +72,7 @@ It is recommended to use `-a` with `size` to ensure you get the proper sizes of 
 | `--before` | `--before "2026-10-16 14:30:00"` | Includes only files modified before the given local date/time. |
 | `--after` | `--after "2026-10-16 14:30:00"` | Includes only files modified after the given local date/time. |
 | `--today` | `--today` | Includes only files modified on the current local system date. |
+| `--exclude` | `--exclude "^temp"` | Excludes files whose names match the regex pattern (effectively the opposite of `-p` for file names). |
 
 When `-f` is omitted, commands keep their current output format.
 

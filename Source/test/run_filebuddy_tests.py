@@ -336,6 +336,30 @@ def test_date_filters(root: str):
     today_lines = normalize_lines(os.path.join(root, "today-filter.txt"))
     expect_equal(today_lines, ["./today.txt"])
 
+def test_exclude_pattern(root: str):
+    result = run_fb([
+        "list",
+        "-d",
+        ".",
+        "-r",
+        "-p",
+        r".*",
+        "--exclude",
+        r"^test(\.txt)?$",
+        "-o",
+        "exclude.txt",
+    ], root)
+    ensure_success(result)
+
+    actual = set(normalize_lines(os.path.join(root, "exclude.txt")))
+    expected = {
+        "./folder2/",
+        "./notes.md",
+        "./header.h",
+        "./folder2/folder/",
+    }
+    expect_equal(actual, expected)
+
 
 def run_test_case(test_case: TestCase) -> bool:
     with tempfile.TemporaryDirectory(prefix="filebuddy_test_") as temp_dir:
@@ -379,6 +403,7 @@ def main() -> int:
         TestCase("T010", "copy move delete flow", test_copy_move_delete),
         TestCase("T011", "search with forced streaming read", test_search_streaming_threshold_override),
         TestCase("T012", "before/after/today date filters", test_date_filters),
+        TestCase("T013", "exclude regex behaves as opposite of -p", test_exclude_pattern),
     ]
 
     passed = 0

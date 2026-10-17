@@ -516,6 +516,7 @@ def main(args):
     parser.add_argument('--before', type=str, help='Only include files modified before this local date/time (ISO-like format, e.g. "2026-10-16 14:30:00").')
     parser.add_argument('--after', type=str, help='Only include files modified after this local date/time (ISO-like format, e.g. "2026-10-16 14:30:00").')
     parser.add_argument('--today', action='store_true', help='Only include files modified today (local system date).')
+    parser.add_argument('--exclude', type=str, help='Exclude files whose names match this regex pattern.')
 
     if(len(args) <= 1):
         parser.print_help()
@@ -580,6 +581,7 @@ def main(args):
     beforeValue = getattr(args, 'before', None)
     afterValue = getattr(args, 'after', None)
     todayOnly = getattr(args, 'today', False)
+    excludePatternStr = getattr(args, 'exclude', None)
 
     def parse_local_datetime(value: str, flag_name: str) -> datetime | None:
         try:
@@ -605,6 +607,14 @@ def main(args):
     if modified_before is not None and modified_after is not None and modified_after >= modified_before:
         print(f'Invalid date range: --after ({afterValue}) must be earlier than --before ({beforeValue}).')
         return 1
+
+    excludePattern: re.Pattern | None = None
+    if excludePatternStr is not None:
+        try:
+            excludePattern = re.compile(excludePatternStr)
+        except re.error as e:
+            print(f"Invalid regex pattern '{excludePatternStr}' for --exclude: {e}")
+            return 1
 
     local_today = datetime.now().date()
     # get output file, if any
@@ -658,6 +668,11 @@ def main(args):
         if todayOnly and modified_at.date() != local_today:
             return False
         return True
+
+    def file_name_is_excluded(name: str) -> bool:
+        if excludePattern is None:
+            return False
+        return re.search(excludePattern, name) is not None
 
     def print_output(formatted_string: str, match = '', color=MATCH_COLOR, wrapColor = RESET_COLOR, raw_value: str | None = None, match_obj = None, apply_format: bool = True):
         nonlocal noColors, outputFormat
@@ -873,6 +888,8 @@ def main(args):
             eligible_files: list[tuple[str, str]] = []
             for file in files:
                 if not hidden and file.startswith('.'):
+                    continue
+                if file_name_is_excluded(file):
                     continue
                 full_path = f'{root}/{file}'
                 if is_output_file(full_path):
@@ -1168,6 +1185,8 @@ def main(args):
                 # ignore hidden files
                 if not hidden and file.startswith('.'):
                     continue
+                if file_name_is_excluded(file):
+                    continue
 
                 # if name pattern is provided, file name must match it
                 if namePattern and not re.search(namePattern, file):
@@ -1298,6 +1317,8 @@ def main(args):
             eligible_files: list[tuple[str, str]] = []
             for file in files:
                 if not hidden and file.startswith('.'):
+                    continue
+                if file_name_is_excluded(file):
                     continue
 
                 full_path = f'{root}/{file}'
@@ -1448,6 +1469,8 @@ def main(args):
             for file in files:
                 if not hidden and file.startswith('.'):
                     continue
+                if file_name_is_excluded(file):
+                    continue
                 full_path = f'{root}/{file}'
                 if is_output_file(full_path):
                     continue
@@ -1499,6 +1522,8 @@ def main(args):
             for file in files:
                 if not hidden and file.startswith('.'):
                     continue
+                if file_name_is_excluded(file):
+                    continue
 
                 full_path = f'{root}/{file}'
                 if is_output_file(full_path):
@@ -1546,6 +1571,8 @@ def main(args):
             for file in files:
                 # ignore hidden files if hidden flag is not set
                 if not hidden and file.startswith('.'):
+                    continue
+                if file_name_is_excluded(file):
                     continue
 
                 full_path = f'{root}/{file}'
@@ -1617,6 +1644,8 @@ def main(args):
             for file in files:
                 full_path = f'{root}/{file}'
                 if is_output_file(full_path):
+                    continue
+                if file_name_is_excluded(file):
                     continue
                 _rename(file, new_name, renameFilesAction)
 
@@ -1726,6 +1755,8 @@ def main(args):
                 full_path = f'{root}/{file}'
                 if is_output_file(full_path):
                     continue
+                if file_name_is_excluded(file):
+                    continue
                 _delete(file, False)
 
             if not recursive:
@@ -1769,6 +1800,8 @@ def main(args):
                     for file in files:
                         src_file = f'{root}/{file}'
                         if is_output_file(src_file):
+                            continue
+                        if file_name_is_excluded(file):
                             continue
                         dst_file = f'{target_root}/{file}'
                         print_info(f'Copying sub-file: {src_file} => {dst_file}')
@@ -1821,6 +1854,8 @@ def main(args):
                 full_path = f'{root}/{file}'
                 if is_output_file(full_path):
                     continue
+                if file_name_is_excluded(file):
+                    continue
                 _move(file, False, moveFilesAction)
 
             if not recursive:
@@ -1868,6 +1903,8 @@ def main(args):
                     for file in files:
                         src_file = f'{root}/{file}'
                         if is_output_file(src_file):
+                            continue
+                        if file_name_is_excluded(file):
                             continue
                         dst_file = f'{target_root}/{file}'
                         print_info(f'Moving sub-file: {src_file} => {dst_file}')
@@ -1921,6 +1958,8 @@ def main(args):
             for file in files:
                 full_path = f'{root}/{file}'
                 if is_output_file(full_path):
+                    continue
+                if file_name_is_excluded(file):
                     continue
                 _move(file, False, moveFilesAction)
 
