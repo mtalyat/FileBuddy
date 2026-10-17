@@ -46,6 +46,10 @@ For replace, escaped characters in replacement text are decoded before applying 
 
 For search, extract, and replace, the `-p` pattern filters file names before reading file contents.
 
+For search/find (default output mode), each matching line is printed once per file even when multiple regex matches occur on the same line.
+
+When emitted output contains non-printable control characters (common when scanning binary-ish text), FileBuddy replaces them with `�` to keep output safe and readable.
+
 Read-only commands (`search`, `extract`, `list`, and `size`) automatically use internal parallel workers to improve performance while keeping output order stable.
 
 Large text files (100 MB and above) are read in chunks to avoid single huge read operations.

@@ -40,6 +40,7 @@ ERROR_COLOR = '\033[31m' # Red
 SUCCESS_COLOR = '\033[32m' # Green
 INFO_COLOR = '\033[90m' # Gray
 RESET_COLOR = '\033[0m' # Reset
+SAFE_OUTPUT_REPLACEMENT = '�'
 
 EXT_PDF = '.pdf'
 EXT_WORD = '.docx'
@@ -56,6 +57,20 @@ def get_int_env(name: str, fallback: int) -> int:
         return value if value > 0 else fallback
     except ValueError:
         return fallback
+
+def sanitize_output_text(text: str, preserve_ansi_escape: bool = False) -> str:
+    """Replaces non-printable control characters with a safe visible marker."""
+    def sanitize_char(ch: str) -> str:
+        code = ord(ch)
+        if preserve_ansi_escape and code == 27:
+            return ch
+        if ch in ('\n', '\r', '\t'):
+            return ch
+        if (0 <= code < 32) or code == 127:
+            return SAFE_OUTPUT_REPLACEMENT
+        return ch
+
+    return ''.join(sanitize_char(ch) for ch in text)
 
 def print_command_usage(command: str) -> bool:
     canonical = COMMAND_ALIASES.get(command, command)
@@ -623,7 +638,7 @@ def main(args):
     if output_file is not None:
         try:
             output_file_path = fix_path(os.path.abspath(output_file))
-            output_file = open(output_file, 'w')
+            output_file = open(output_file, 'w', encoding='utf-8')
         except Exception as e:
             print(f"Could not open output file '{output_file}': {e}")
             return 1
@@ -688,7 +703,7 @@ def main(args):
             raw_value = formatted_string.replace(token, match, 1)
 
         if outputFormat is not None and apply_format:
-            message = apply_output_format(outputFormat, raw_value, match_obj)
+            message = sanitize_output_text(apply_output_format(outputFormat, raw_value, match_obj))
             if output_file is not None:
                 output_file.write(message + '\n')
             else:
@@ -700,11 +715,14 @@ def main(args):
 
         if output_file is not None:
             # do not add color to output file
-            message = formatted_string.replace(token, match, 1)
+            message = sanitize_output_text(formatted_string.replace(token, match, 1))
             output_file.write(message + '\n')
         else:
             # format the message with color
-            message = formatted_string.replace(token, f'{color}{match}{wrapColor}', 1)
+            message = sanitize_output_text(
+                formatted_string.replace(token, f'{color}{match}{wrapColor}', 1),
+                preserve_ansi_escape=not noColors
+            )
 
             # truncate the message if it is too long for the terminal
             term_width = get_terminal_width()
@@ -725,7 +743,7 @@ def main(args):
             return
         
         # print error message
-        message = f'ERROR: {message}'
+        message = sanitize_output_text(f'ERROR: {message}')
         if output_file is not None:
             # do not add color to output file
             output_file.write(f'{message}\n')
@@ -780,7 +798,7 @@ def main(args):
             return
         
         # print info message
-        message = f'{message}'
+        message = sanitize_output_text(f'{message}')
         if output_file is not None:
             # do not add color to output file
             output_file.write(f'{message}\n')
@@ -915,6 +933,7 @@ def main(args):
             # search file names and contents if patterns are specified
             for file, full_path in eligible_files:
                 printedFileName = False
+                printed_line_numbers: set[int] = set()
 
                 if namePattern:
                     match_obj = re.search(namePattern, file)
@@ -962,6 +981,10 @@ def main(args):
                                     line_starts.append(cursor)
 
                                 def print_line_preview(preview_line_number: int, preview_line_start: int):
+                                    if preview_line_number in printed_line_numbers:
+                                        return
+                                    printed_line_numbers.add(preview_line_number)
+
                                     preview_line_end = buffer.find('\n', preview_line_start)
                                     if preview_line_end == -1:
                                         preview_line_end = len(buffer)
@@ -1006,6 +1029,10 @@ def main(args):
                             if not match_text:
                                 match_text = match_obj.group(0).split('\n', 1)[0]
 
+                            if line_number in printed_line_numbers:
+                                continue
+                            printed_line_numbers.add(line_number)
+
                             raw_value = f'    {line_number}: {line_text}'
                             print_output(f'    {line_number}: {before}{{}}{after}', match_text, wrapColor=INFO_COLOR, raw_value=raw_value, match_obj=match_obj)
 
@@ -1044,6 +1071,10 @@ def main(args):
                                 line_starts.append(cursor)
 
                             def print_line_preview(preview_line_number: int, preview_line_start: int):
+                                if preview_line_number in printed_line_numbers:
+                                    return
+                                printed_line_numbers.add(preview_line_number)
+
                                 preview_line_end = contents.find('\n', preview_line_start)
                                 if preview_line_end == -1:
                                     preview_line_end = len(contents)
@@ -1087,6 +1118,10 @@ def main(args):
 
                         if not match_text:
                             match_text = match_obj.group(0).split('\n', 1)[0]
+
+                        if line_number in printed_line_numbers:
+                            continue
+                        printed_line_numbers.add(line_number)
 
                         raw_value = f'    {line_number}: {line_text}'
                         print_output(f'    {line_number}: {before}{{}}{after}', match_text, wrapColor=INFO_COLOR, raw_value=raw_value, match_obj=match_obj)

@@ -173,6 +173,28 @@ def test_search_format_content_only(root: str):
     ]
     expect_equal(actual, expected)
 
+def test_search_deduplicates_lines(root: str):
+    write_file(os.path.join(root, "same-line.txt"), "repeat repeat\n")
+
+    result = run_fb([
+        "search",
+        r"repeat",
+        "-p",
+        r"^same-line\.txt$",
+        "-d",
+        ".",
+        "-r",
+        "-o",
+        "out.txt",
+    ], root)
+    ensure_success(result)
+    actual = normalize_lines(os.path.join(root, "out.txt"))
+    expected = [
+        "./same-line.txt",
+        "    1: repeat repeat",
+    ]
+    expect_equal(actual, expected)
+
 
 def test_list_format_paths(root: str):
     result = run_fb(["list", "-d", ".", "-r", "--format", "($0)", "-o", "out.txt"], root)
@@ -360,6 +382,15 @@ def test_exclude_pattern(root: str):
     }
     expect_equal(actual, expected)
 
+def test_search_sanitizes_control_chars(root: str):
+    write_file(os.path.join(root, "noise.txt"), "A\x07B\n")
+
+    result = run_fb(["search", r"A.B", "-p", r"^noise\.txt$", "-d", ".", "-r", "--nocolor", "-o", "out.txt"], root)
+    ensure_success(result)
+
+    actual = normalize_lines(os.path.join(root, "out.txt"))
+    expect_equal(actual, ["./noise.txt", "    1: A�B"])
+
 
 def run_test_case(test_case: TestCase) -> bool:
     with tempfile.TemporaryDirectory(prefix="filebuddy_test_") as temp_dir:
@@ -396,6 +427,7 @@ def main() -> int:
         TestCase("T004", "extract capture groups", test_extract_groups),
         TestCase("T004b", "extract format emits one line per match", test_extract_format_single_output_per_match),
         TestCase("T005", "search format applies to content", test_search_format_content_only),
+        TestCase("T005b", "search emits each matching line once", test_search_deduplicates_lines),
         TestCase("T006", "list format applies to paths", test_list_format_paths),
         TestCase("T007", "-o output file excluded", test_output_file_excluded),
         TestCase("T008", "rename with $1 groups", test_rename_groups),
@@ -404,6 +436,7 @@ def main() -> int:
         TestCase("T011", "search with forced streaming read", test_search_streaming_threshold_override),
         TestCase("T012", "before/after/today date filters", test_date_filters),
         TestCase("T013", "exclude regex behaves as opposite of -p", test_exclude_pattern),
+        TestCase("T014", "search sanitizes control characters", test_search_sanitizes_control_chars),
     ]
 
     passed = 0
