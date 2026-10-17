@@ -2030,4 +2030,8 @@ def main(args):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    try:
+        sys.exit(main(sys.argv))
+    except KeyboardInterrupt:
+        print('\nOperation cancelled (Ctrl+C).')
+        sys.exit(130)
