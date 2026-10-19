@@ -177,15 +177,23 @@ class Action:
     common: list[any]
     specific: list[list[any]]
 
-    def __init__(self, name: str, format: str, func: callable, common: list, specific: list):
+    def __init__(self, name: str, format: str, func: callable, common: list, specific: list, display_args: callable | None = None):
         self.name = name
         self.func = func
         self.format = format
         self.common = common
         self.specific = specific
+        self.display_args = display_args
 
     def print_actions(self):
-        print('\n'.join([f"{self.format.format(*args)}" for args in self.specific]))
+        lines = []
+        for args in self.specific:
+            if self.display_args is not None:
+                display_values = self.display_args(args)
+            else:
+                display_values = args
+            lines.append(f"{self.format.format(*display_values)}")
+        print('\n'.join(lines))
 
     def print(self):
         print(f'{self.name}:')
@@ -532,6 +540,7 @@ def main(args):
     parser.add_argument('--after', type=str, help='Only include files modified after this local date/time (ISO-like format, e.g. "2026-10-16 14:30:00").')
     parser.add_argument('--today', action='store_true', help='Only include files modified today (local system date).')
     parser.add_argument('--exclude', type=str, help='Exclude files whose names match this regex pattern.')
+    parser.add_argument('--absolute', action='store_true', help='Print paths as absolute paths. By default, paths are relative to the working directory.')
 
     if(len(args) <= 1):
         parser.print_help()
@@ -597,6 +606,7 @@ def main(args):
     afterValue = getattr(args, 'after', None)
     todayOnly = getattr(args, 'today', False)
     excludePatternStr = getattr(args, 'exclude', None)
+    absolutePaths = getattr(args, 'absolute', False)
 
     def parse_local_datetime(value: str, flag_name: str) -> datetime | None:
         try:
@@ -668,6 +678,30 @@ def main(args):
         if output_file_path is None:
             return False
         return fix_path(os.path.abspath(path)) == output_file_path
+
+    def display_path(path: str, is_dir: bool = False) -> str:
+        abs_path = fix_path(os.path.abspath(path))
+        if absolutePaths:
+            display = abs_path
+        else:
+            display = fix_path(os.path.relpath(abs_path, os.getcwd()))
+            if display == '.':
+                display = ''
+
+        if is_dir:
+            if display and not display.endswith('/'):
+                display += '/'
+        elif display == '':
+            display = '.'
+        return display
+
+    def display_action_args(args: list[any]) -> list[any]:
+        display_values = list(args)
+        if len(display_values) > 0 and isinstance(display_values[0], str):
+            display_values[0] = display_path(display_values[0])
+        if len(display_values) > 1 and isinstance(display_values[1], str):
+            display_values[1] = display_path(display_values[1])
+        return display_values
 
     def file_matches_modified_filters(path: str) -> bool:
         try:
@@ -897,11 +931,13 @@ def main(args):
                     match_obj = re.search(namePattern, dir)
                     if match_obj:
                         # add to results
-                        raw_value = f'{root}/{dir}/'
+                        raw_value = display_path(f'{root}/{dir}', is_dir=True)
                         results_names.append(raw_value)
                         # print the directory name with match highlighted
                         before, match_text, after = split_match(match_obj)
-                        print_output(f'{root}/{before}{{}}{after}/', match_text, raw_value=raw_value, match_obj=match_obj, apply_format=False)
+                        parent_path = display_path(root)
+                        parent_prefix = '' if parent_path in ('', '.') else f'{parent_path}/'
+                        print_output(f'{parent_prefix}{before}{{}}{after}/', match_text, raw_value=raw_value, match_obj=match_obj, apply_format=False)
 
             eligible_files: list[tuple[str, str]] = []
             for file in files:
@@ -938,9 +974,12 @@ def main(args):
                 if namePattern:
                     match_obj = re.search(namePattern, file)
                     if match_obj:
-                        results_names.append(full_path)
+                        display_full_path = display_path(full_path)
+                        results_names.append(display_full_path)
                         before, match_text, after = split_match(match_obj)
-                        print_output(f'{root}/{before}{{}}{after}', match_text, raw_value=full_path, match_obj=match_obj, apply_format=False)
+                        parent_path = display_path(root)
+                        parent_prefix = '' if parent_path in ('', '.') else f'{parent_path}/'
+                        print_output(f'{parent_prefix}{before}{{}}{after}', match_text, raw_value=display_full_path, match_obj=match_obj, apply_format=False)
                         printedFileName = True
 
                 hits = 0
@@ -954,7 +993,8 @@ def main(args):
                                 continue
 
                             if not printedFileName:
-                                print_output(f'{full_path}{{}}', raw_value=full_path, apply_format=False)
+                                display_full_path = display_path(full_path)
+                                print_output(display_full_path, raw_value=display_full_path, apply_format=False)
                                 printedFileName = True
 
                             hits += 1
@@ -1044,7 +1084,8 @@ def main(args):
                             continue
 
                         if not printedFileName:
-                            print_output(f'{full_path}{{}}', raw_value=full_path, apply_format=False)
+                            display_full_path = display_path(full_path)
+                            print_output(display_full_path, raw_value=display_full_path, apply_format=False)
                             printedFileName = True
 
                         hits += 1
@@ -1127,7 +1168,7 @@ def main(args):
                         print_output(f'    {line_number}: {before}{{}}{after}', match_text, wrapColor=INFO_COLOR, raw_value=raw_value, match_obj=match_obj)
 
                 if printedFileName:
-                    results_contents[full_path] = hits
+                    results_contents[display_path(full_path)] = hits
             if not recursive:
                 break
         # Add to summary table and hits table
@@ -1185,7 +1226,7 @@ def main(args):
                 with open(path, 'w', encoding='utf-8') as f:
                     f.write(new_contents)
         
-                print_output(f'Replaced: {path}')
+                print_output(f'Replaced: {display_path(path)}')
                 return True
         
             except Exception as e:
@@ -1199,7 +1240,8 @@ def main(args):
             '{} ({} changes)',
             replace_file,
             [],
-            []
+            [],
+            display_action_args
         )
         
         results_hits = dict()
@@ -1263,7 +1305,8 @@ def main(args):
 
                     # PRINT FILE NAME ONLY ONCE
                     if not printedFileName:
-                        print_output(f'{full_path}', apply_format=False)
+                        display_full_path = display_path(full_path)
+                        print_output(display_full_path, raw_value=display_full_path, apply_format=False)
                         printedFileName = True
 
                     # preview replacement
@@ -1296,7 +1339,7 @@ def main(args):
                         new_contents
                     ])
         
-                    results_hits[full_path] = file_hits
+                    results_hits[display_path(full_path)] = file_hits
         
             if not recursive:
                 break
@@ -1395,7 +1438,8 @@ def main(args):
 
                     if outputFormat is not None:
                         if not printedFileName:
-                            print_output(f'{full_path}', raw_value=full_path, match_obj=match_obj, apply_format=False)
+                            display_full_path = display_path(full_path)
+                            print_output(display_full_path, raw_value=display_full_path, match_obj=match_obj, apply_format=False)
                             printedFileName = True
 
                         match_text = match_obj.group(0)
@@ -1408,7 +1452,8 @@ def main(args):
                             continue
 
                         if not printedFileName:
-                            print_output(f'{full_path}', raw_value=full_path, match_obj=match_obj, apply_format=False)
+                            display_full_path = display_path(full_path)
+                            print_output(display_full_path, raw_value=display_full_path, match_obj=match_obj, apply_format=False)
                             printedFileName = True
 
                         group_text = str(group).replace('\r\n', '\n').replace('\r', '\n')
@@ -1446,7 +1491,7 @@ def main(args):
                 if file_extracts > 0:
                     extracted_files += 1
                     extracted_total += file_extracts
-                    results_hits[full_path] = file_extracts
+                    results_hits[display_path(full_path)] = file_extracts
 
             if not recursive:
                 break
@@ -1491,12 +1536,12 @@ def main(args):
             visible_dirs = [dir for dir in dirs if hidden or not dir.startswith('.')]
             if pattern:
                 for dir in filter_pattern_names(visible_dirs):
-                    raw_value = f'{root}/{dir}/'
+                    raw_value = display_path(f'{root}/{dir}', is_dir=True)
                     print_output(raw_value, raw_value=raw_value)
                     results_directory_count += 1
             else:
                 for dir in visible_dirs:
-                    raw_value = f'{root}/{dir}/'
+                    raw_value = display_path(f'{root}/{dir}', is_dir=True)
                     print_output(raw_value, raw_value=raw_value)
                     results_directory_count += 1
 
@@ -1516,12 +1561,14 @@ def main(args):
             if pattern:
                 for file in filter_pattern_names(visible_files):
                     full_path = f'{root}/{file}'
-                    print_output(f'{root}/{file}', raw_value=full_path)
+                    display_full_path = display_path(full_path)
+                    print_output(display_full_path, raw_value=display_full_path)
                     results_file_count += 1
             else:
                 for file in visible_files:
                     full_path = f'{root}/{file}'
-                    print_output(f'{root}/{file}', raw_value=full_path)
+                    display_full_path = display_path(full_path)
+                    print_output(display_full_path, raw_value=display_full_path)
                     results_file_count += 1
             if not recursive:
                 break
@@ -1600,7 +1647,7 @@ def main(args):
                 # print the directory name with size
                 full_path = f'{root}/{dir}'
                 size = results_sizes.get(full_path, 0)
-                raw_value = f'{full_path}/ => {get_byte_string(size)}'
+                raw_value = f'{display_path(full_path, is_dir=True)} => {get_byte_string(size)}'
                 print_output(raw_value, raw_value=raw_value, match_obj=match_obj)
             
             for file in files:
@@ -1623,7 +1670,7 @@ def main(args):
 
                 # print the file name with size
                 size = results_sizes.get(full_path, 0)
-                raw_value = f'{full_path} => {get_byte_string(size)}'
+                raw_value = f'{display_path(full_path)} => {get_byte_string(size)}'
                 print_output(raw_value, raw_value=raw_value, match_obj=match_obj)
             
             if not recursive:
@@ -1641,14 +1688,14 @@ def main(args):
             try:
                 print_info(f'Renaming: {old_path} => {new_path}')
                 os.rename(old_path, new_path)
-                print_output(f'{old_path} => {new_path}')
+                print_output(f'{display_path(old_path)} => {display_path(new_path)}')
                 return True
             except Exception as e:
                 print_error(f'Could not rename directory {old_path}: {e}')
                 return False
             
-        renameDirsAction = Action('Rename', '{} => {}', rename, [], [])
-        renameFilesAction = Action('Rename', '{} => {}', rename, [], [])
+        renameDirsAction = Action('Rename', '{} => {}', rename, [], [], display_action_args)
+        renameFilesAction = Action('Rename', '{} => {}', rename, [], [], display_action_args)
 
         # search all files and directories by walking through them
         for root, dirs, files in os.walk(directory):
@@ -1706,7 +1753,7 @@ def main(args):
             try:
                 print_info(f'Deleting file: {path}')
                 os.remove(path)
-                print_output(path)
+                print_output(display_path(path))
                 return True
             except Exception as e:
                 print_error(f'Could not delete file {path}: {e}')
@@ -1734,7 +1781,7 @@ def main(args):
                 print_info(f'Deleting directory: {path}/')
                 try:
                     os.rmdir(path)
-                    print_output(f'{path}/')
+                    print_output(display_path(path, is_dir=True))
                 except Exception as e:
                     print_error(f'Could not delete directory {path}: {e}')
                     return False
@@ -1743,8 +1790,8 @@ def main(args):
                 print_error(f'Could not delete directory {path}: {e}')
                 return False
 
-        directoriesAction = Action('Delete', '{}/', delete_directory, [], [])
-        filesAction = Action('Delete', '{}', delete_file, [], [])
+        directoriesAction = Action('Delete', '{}/', delete_directory, [], [], display_action_args)
+        filesAction = Action('Delete', '{}', delete_file, [], [], display_action_args)
         directoriesToDelete = list()
 
         # search all files and directories by walking through them
@@ -1814,7 +1861,7 @@ def main(args):
             try:
                 print_info(f'Copying file: {from_path} => {to_path}')
                 shutil.copy2(from_path, to_path)
-                print_output(f'{from_path} => {to_path}')
+                print_output(f'{display_path(from_path)} => {display_path(to_path)}')
                 return True
             except Exception as e:
                 print_error(f'Could not copy file {from_path}: {e}')
@@ -1841,14 +1888,14 @@ def main(args):
                         dst_file = f'{target_root}/{file}'
                         print_info(f'Copying sub-file: {src_file} => {dst_file}')
                         shutil.copy2(src_file, dst_file)
-                print_output(f'{from_path}/ => {to_path}/')
+                print_output(f'{display_path(from_path, is_dir=True)} => {display_path(to_path, is_dir=True)}')
                 return True
             except Exception as e:
                 print_error(f'Could not copy directory {from_path}: {e}')
                 return False
 
-        moveDirsAction = Action('Copy', '{} => {}', move_directory, [], [])
-        moveFilesAction = Action('Copy', '{} => {}', move_file, [], [])
+        moveDirsAction = Action('Copy', '{} => {}', move_directory, [], [], display_action_args)
+        moveFilesAction = Action('Copy', '{} => {}', move_file, [], [], display_action_args)
 
         # search all files and directories by walking through them
         for root, dirs, files in os.walk(directory):
@@ -1917,7 +1964,7 @@ def main(args):
             try:
                 print_info(f'Moving file: {from_path} => {to_path}')
                 shutil.move(from_path, to_path)
-                print_output(f'{from_path} => {to_path}')
+                print_output(f'{display_path(from_path)} => {display_path(to_path)}')
                 return True
             except Exception as e:
                 print_error(f'Could not move file {from_path}: {e}')
@@ -1946,14 +1993,14 @@ def main(args):
                         shutil.move(src_file, dst_file)
                 # remove the original directory
                 shutil.rmtree(from_path)
-                print_output(f'{from_path}/ => {to_path}/')
+                print_output(f'{display_path(from_path, is_dir=True)} => {display_path(to_path, is_dir=True)}')
                 return True
             except Exception as e:
                 print_error(f'Could not move directory {from_path}: {e}')
                 return False
 
-        moveDirsAction = Action('Move', '{} => {}', move_directory, [], [])
-        moveFilesAction = Action('Move', '{} => {}', move_file, [], [])
+        moveDirsAction = Action('Move', '{} => {}', move_directory, [], [], display_action_args)
+        moveFilesAction = Action('Move', '{} => {}', move_file, [], [], display_action_args)
 
         # search all files and directories by walking through them
         for root, dirs, files in os.walk(directory):

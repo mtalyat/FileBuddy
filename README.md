@@ -13,11 +13,11 @@ FileBuddy is a utility Python script, intended to make quickly modifying, search
 
 General form of command:
 
-    fb <command> <options> [-p pattern] [-d directory] [-r recursive] [-o output] [-f format] [-a hidden] [-v verbose] [-h help]
+    fb <command> <options> [-p pattern] [-d directory] [-r recursive] [-o output] [-f format] [-a hidden] [-v verbose] [-h help] [--absolute]
 
 OR
 
-    python fb.py <command> <options> [-p pattern] [-d directory] [-r recursive] [-o output] [-f format] [-a hidden] [-v verbose] [-h help]
+    python fb.py <command> <options> [-p pattern] [-d directory] [-r recursive] [-o output] [-f format] [-a hidden] [-v verbose] [-h help] [--absolute]
 
 ## Commands
 
@@ -50,6 +50,8 @@ For search/find (default output mode), each matching line is printed once per fi
 
 When emitted output contains non-printable control characters (common when scanning binary-ish text), FileBuddy replaces them with `�` to keep output safe and readable.
 
+By default, printed paths are relative to the working directory and do not include a leading `./`. Use `--absolute` to print absolute paths.
+
 Read-only commands (`search`, `extract`, `list`, and `size`) automatically use internal parallel workers to improve performance while keeping output order stable.
 
 Large text files (100 MB and above) are read in chunks to avoid single huge read operations.
@@ -77,6 +79,7 @@ It is recommended to use `-a` with `size` to ensure you get the proper sizes of 
 | `--after` | `--after "2026-10-16 14:30:00"` | Includes only files modified after the given local date/time. |
 | `--today` | `--today` | Includes only files modified on the current local system date. |
 | `--exclude` | `--exclude "^temp"` | Excludes files whose names match the regex pattern (effectively the opposite of `-p` for file names). |
+| `--absolute` | `--absolute` | Prints paths as absolute paths instead of working-directory-relative paths. |
 
 When `-f` is omitted, commands keep their current output format.
 

@@ -24,6 +24,9 @@ def normalize_lines(path: str) -> list[str]:
     with open(path, "r", encoding="utf-8") as f:
         return [line.rstrip("\n") for line in f.readlines()]
 
+def normalize_path(path: str) -> str:
+    return path.replace("\\", "/")
+
 
 def run_fb(args: list[str], cwd: str, env_overrides: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     cmd = [sys.executable, FB_PATH] + args
@@ -80,13 +83,13 @@ def test_list_recursive(root: str):
     ensure_success(result)
     actual = set(normalize_lines(os.path.join(root, "out.txt")))
     expected = {
-        "./folder2/",
-        "./test.txt",
-        "./notes.md",
-        "./header.h",
-        "./folder2/folder/",
-        "./folder2/test",
-        "./folder2/folder/test",
+        "folder2/",
+        "test.txt",
+        "notes.md",
+        "header.h",
+        "folder2/folder/",
+        "folder2/test",
+        "folder2/folder/test",
     }
     expect_equal(actual, expected)
 
@@ -96,7 +99,7 @@ def test_search_file_filter(root: str):
     ensure_success(result)
     actual = normalize_lines(os.path.join(root, "out.txt"))
     expected = [
-        "./test.txt",
+        "test.txt",
         "    1: Hello world!",
         "    2: Hello cow!",
     ]
@@ -118,7 +121,7 @@ def test_extract_groups(root: str):
     ensure_success(result)
     actual = normalize_lines(os.path.join(root, "out.txt"))
     expected = [
-        "./test.txt",
+        "test.txt",
         "    1:1: world",
         "    2:1: cow",
     ]
@@ -142,7 +145,7 @@ def test_extract_format_single_output_per_match(root: str):
     ensure_success(result)
     actual = normalize_lines(os.path.join(root, "out.txt"))
     expected = [
-        "./test.txt",
+        "test.txt",
         "Hello, world",
         "Hello, cow",
         "Bye, pig",
@@ -167,7 +170,7 @@ def test_search_format_content_only(root: str):
     ensure_success(result)
     actual = normalize_lines(os.path.join(root, "out.txt"))
     expected = [
-        "./test.txt",
+        "test.txt",
         ">Hello world!<",
         ">Hello cow!<",
     ]
@@ -190,7 +193,7 @@ def test_search_deduplicates_lines(root: str):
     ensure_success(result)
     actual = normalize_lines(os.path.join(root, "out.txt"))
     expected = [
-        "./same-line.txt",
+        "same-line.txt",
         "    1: repeat repeat",
     ]
     expect_equal(actual, expected)
@@ -201,13 +204,13 @@ def test_list_format_paths(root: str):
     ensure_success(result)
     actual = set(normalize_lines(os.path.join(root, "out.txt")))
     expected = {
-        "(./folder2/)",
-        "(./test.txt)",
-        "(./notes.md)",
-        "(./header.h)",
-        "(./folder2/folder/)",
-        "(./folder2/test)",
-        "(./folder2/folder/test)",
+        "(folder2/)",
+        "(test.txt)",
+        "(notes.md)",
+        "(header.h)",
+        "(folder2/folder/)",
+        "(folder2/test)",
+        "(folder2/folder/test)",
     }
     expect_equal(actual, expected)
 
@@ -217,7 +220,7 @@ def test_output_file_excluded(root: str):
     ensure_success(result)
     lines = normalize_lines(os.path.join(root, "out-check.txt"))
     expect_true(
-        "./out-check.txt" not in lines,
+        "out-check.txt" not in lines,
         "Output file path should not appear in command output",
         "\n".join(lines),
     )
@@ -296,7 +299,7 @@ def test_search_streaming_threshold_override(root: str):
     ensure_success(result)
     actual = normalize_lines(os.path.join(root, "out.txt"))
     expect_true(
-        "./large.txt" in actual and any("CrossChunkToken" in line for line in actual),
+        "large.txt" in actual and any("CrossChunkToken" in line for line in actual),
         "Search finds matches when chunked reading is forced",
         "\n".join(actual),
     )
@@ -316,7 +319,7 @@ def test_search_streaming_threshold_override(root: str):
     ensure_success(result_boundary)
     boundary_lines = normalize_lines(os.path.join(root, "boundary_out.txt"))
     expect_true(
-        "./boundary.txt" in boundary_lines and any("XYZ" in line for line in boundary_lines),
+        "boundary.txt" in boundary_lines and any("XYZ" in line for line in boundary_lines),
         "Search finds regex matches that span chunk boundaries",
         "\n".join(boundary_lines),
     )
@@ -333,7 +336,7 @@ def test_date_filters(root: str):
     now = datetime.now()
     old_time = now - timedelta(days=3)
     middle_time = now - timedelta(days=1)
-    today_time = now - timedelta(hours=1)
+    today_time = now
 
     os.utime(old_path, (old_time.timestamp(), old_time.timestamp()))
     os.utime(middle_path, (middle_time.timestamp(), middle_time.timestamp()))
@@ -345,18 +348,18 @@ def test_date_filters(root: str):
     result_before = run_fb(["list", "-d", ".", "-r", "-p", pattern, "--before", before_cutoff, "-o", "before.txt"], root)
     ensure_success(result_before)
     before_lines = normalize_lines(os.path.join(root, "before.txt"))
-    expect_equal(before_lines, ["./old.txt"])
+    expect_equal(before_lines, ["old.txt"])
 
     after_cutoff = (now - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
     result_after = run_fb(["list", "-d", ".", "-r", "-p", pattern, "--after", after_cutoff, "-o", "after.txt"], root)
     ensure_success(result_after)
     after_lines = set(normalize_lines(os.path.join(root, "after.txt")))
-    expect_equal(after_lines, {"./middle.txt", "./today.txt"})
+    expect_equal(after_lines, {"middle.txt", "today.txt"})
 
     result_today = run_fb(["list", "-d", ".", "-r", "-p", pattern, "--today", "-o", "today-filter.txt"], root)
     ensure_success(result_today)
     today_lines = normalize_lines(os.path.join(root, "today-filter.txt"))
-    expect_equal(today_lines, ["./today.txt"])
+    expect_equal(today_lines, ["today.txt"])
 
 def test_exclude_pattern(root: str):
     result = run_fb([
@@ -375,10 +378,10 @@ def test_exclude_pattern(root: str):
 
     actual = set(normalize_lines(os.path.join(root, "exclude.txt")))
     expected = {
-        "./folder2/",
-        "./notes.md",
-        "./header.h",
-        "./folder2/folder/",
+        "folder2/",
+        "notes.md",
+        "header.h",
+        "folder2/folder/",
     }
     expect_equal(actual, expected)
 
@@ -389,7 +392,16 @@ def test_search_sanitizes_control_chars(root: str):
     ensure_success(result)
 
     actual = normalize_lines(os.path.join(root, "out.txt"))
-    expect_equal(actual, ["./noise.txt", "    1: A�B"])
+    expect_equal(actual, ["noise.txt", "    1: A�B"])
+
+
+def test_list_absolute_paths(root: str):
+    result = run_fb(["list", "-d", ".", "-r", "--absolute", "-p", r"^test\.txt$", "-o", "out.txt"], root)
+    ensure_success(result)
+
+    actual = normalize_lines(os.path.join(root, "out.txt"))
+    expected = [f"{normalize_path(root)}/test.txt"]
+    expect_equal(actual, expected)
 
 
 def run_test_case(test_case: TestCase) -> bool:
@@ -437,6 +449,7 @@ def main() -> int:
         TestCase("T012", "before/after/today date filters", test_date_filters),
         TestCase("T013", "exclude regex behaves as opposite of -p", test_exclude_pattern),
         TestCase("T014", "search sanitizes control characters", test_search_sanitizes_control_chars),
+        TestCase("T015", "list supports absolute path output", test_list_absolute_paths),
     ]
 
     passed = 0
