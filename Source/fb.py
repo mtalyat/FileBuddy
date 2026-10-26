@@ -177,7 +177,7 @@ class Action:
     common: list[any]
     specific: list[list[any]]
 
-    def __init__(self, name: str, format: str, func: callable, common: list, specific: list, display_args: callable | None = None):
+    def __init__(self, name: str, format: str, func: callable, common: list, specific: list, display_args = None):
         self.name = name
         self.func = func
         self.format = format
